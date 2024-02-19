@@ -45,6 +45,8 @@ async fn main() {
     let dlinn_a_pasvord: usize = first_word(&conf[0].to_string()).to_string().parse::<usize>().unwrap();
     let alvabet = first_word(&conf[1].to_string()).to_string();
     let len_uvelichenie = string_to_bool(first_word(&conf[2].to_string()).to_string());
+    let probel = string_to_bool(first_word(&conf[3].to_string()).to_string());
+    //---------------------------------------------------------------------
 
     //читаем файл с адресами и конвертируем их в h160
     let file_content = match lines_from_file("address.txt") {
@@ -66,6 +68,7 @@ async fn main() {
 
     println!("{}{:?}", blue("ДЛИНА ПАРОЛЯ:"), green(dlinn_a_pasvord));
     println!("{}{:?}", blue("АЛФАВИТ:"), green(&alvabet));
+    println!("{}{:?}", blue("ДОБАВЛЕНИЕ ПРОБЕЛА:"), green(probel.clone()));
     println!("{}{:?}", blue("УВЕЛИЧЕНИЕ ДЛИННЫ ПАРОЛЯ:"), green(len_uvelichenie.clone()));
     println!("{}{:?}", blue("АДРЕСОВ ЗАГРУЖЕННО:"), green(database.len()));
 
@@ -73,17 +76,21 @@ async fn main() {
     //получать сообщения от потоков
     let (tx, rx) = mpsc::channel();
 
-    let database = Arc::new(database);
-    let alvabet = Arc::new(format!("{alvabet} "));
+    //если указано добавлять пробел добавим
+    let spase = if probel { " " } else { "" };
 
-    for _i in 0..1 {
-        let clone_db = database.clone();
-        let clone_alvabet = alvabet.clone();
-        let tx = tx.clone();
-        task::spawn_blocking(move || {
-            process(&clone_db, tx, dlinn_a_pasvord, &clone_alvabet, len_uvelichenie);
-        });
-    }
+    //подготавливаем данные для потока
+    let database = Arc::new(database);
+    let alvabet = Arc::new(format!("{alvabet}{spase}"));
+
+    //запускаем отдельный поток, а этот будет слушать и инфу отображать
+    let clone_db = database.clone();
+    let clone_alvabet = alvabet.clone();
+    let tx = tx.clone();
+    task::spawn_blocking(move || {
+        process(&clone_db, tx, dlinn_a_pasvord, &clone_alvabet, len_uvelichenie);
+    });
+
 
     //отображает инфу в однy строку(обновляемую)
     let mut stdout = stdout();
@@ -95,11 +102,11 @@ async fn main() {
     }
 }
 
-fn process(file_content: &Arc<HashSet<Vec<u8>>>, tx: Sender<String>, dlinnA_PASVORD: usize, alvabet: &Arc<String>, len_uvelichenie: bool) {
+fn process(file_content: &Arc<HashSet<Vec<u8>>>, tx: Sender<String>, dlinn_a_pasvord: usize, alvabet: &Arc<String>, len_uvelichenie: bool) {
     let mut start = Instant::now();
     let mut speed: u32 = 0;
 
-    let mut len = dlinnA_PASVORD;
+    let mut len = dlinn_a_pasvord;
 
     let ice_library = ice_library::IceLibrary::new();
     ice_library.init_secp256_lib();

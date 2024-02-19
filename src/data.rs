@@ -1,7 +1,8 @@
 pub fn get_conf_text()->String{
     let t = "3 -Длинна пароля \n\
-    abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890.,-=*/+{}[]<>!@#$%^&()_ -Алфавит(пробел будет добавлен)\n\
+    abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890.,-=*/+{}[]<>!@#$%^&()_ -Алфавит\n\
     1 -Увеличивать длинну пароля в конце(0/1)\n\
+    1 -Добавить пробел(0/1)\n\
     ---------------------------\n\
     Описание:\n\
     -Поиск ведеться по старым кошелькам сжатому и несжатому (1...)\n\
