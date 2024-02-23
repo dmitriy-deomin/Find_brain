@@ -1,21 +1,16 @@
 use std::collections::HashSet;
 use std::fs::{File, OpenOptions};
-use std::io;
-use tokio::task;
+use std::{io, thread};
 use std::io::{BufRead, BufReader, stdout, Write};
 use std::path::Path;
 use std::sync::{Arc, mpsc};
-use std::sync::mpsc::Sender;
 use std::time::{Duration, Instant};
 use base58::{FromBase58, ToBase58};
-use sha2::{Digest, Sha256};
 use sv::util::{hash160};
 use crate::color::{blue, cyan, green, magenta};
 
-extern crate itertools;
-
-use itertools::Itertools;
 use rustils::parse::boolean::string_to_bool;
+use sha2::{Digest, Sha256};
 
 mod ice_library;
 mod color;
@@ -31,7 +26,6 @@ async fn main() {
     println!("{}{}", blue("FIND BRAIN v:"), magenta(version));
     println!("{}", blue("==================="));
 
-
     //Чтение настроек, и если их нет создадим
     //-----------------------------------------------------------------
     let conf = match lines_from_file(&FILE_CONFIG) {
@@ -42,13 +36,19 @@ async fn main() {
         }
     };
 
-    let dlinn_a_pasvord: usize = first_word(&conf[0].to_string()).to_string().parse::<usize>().unwrap();
-    let alvabet = first_word(&conf[1].to_string()).to_string();
-    let len_uvelichenie = string_to_bool(first_word(&conf[2].to_string()).to_string());
-    let probel = string_to_bool(first_word(&conf[3].to_string()).to_string());
+    //количество ядер процессора
+    let count_cpu = num_cpus::get();
+
+    let cpu_core: usize = first_word(&conf[0].to_string()).to_string().parse::<usize>().unwrap();
+    let mut dlinn_a_pasvord: usize = first_word(&conf[1].to_string()).to_string().parse::<usize>().unwrap();
+    let alvabet = first_word(&conf[2].to_string()).to_string();
+    let len_uvelichenie = string_to_bool(first_word(&conf[3].to_string()).to_string());
+    let probel = string_to_bool(first_word(&conf[4].to_string()).to_string());
+    let start_perebor = first_word(&conf[5].to_string()).to_string();
     //---------------------------------------------------------------------
 
-    //читаем файл с адресами и конвертируем их в h160
+    //читаем файл с адресами и конвертируем их в h160 для базы
+    //-----------------------------------------------------------------
     let file_content = match lines_from_file("address.txt") {
         Ok(file) => { file }
         Err(_) => {
@@ -65,96 +65,102 @@ async fn main() {
         let a = &binding.as_slice()[1..=20];
         database.insert(a.to_vec());
     }
+    //-----------------------------------------------------------------------
 
-    println!("{}{:?}", blue("ДЛИНА ПАРОЛЯ:"), green(dlinn_a_pasvord));
-    println!("{}{:?}", blue("АЛФАВИТ:"), green(&alvabet));
-    println!("{}{:?}", blue("ДОБАВЛЕНИЕ ПРОБЕЛА:"), green(probel.clone()));
-    println!("{}{:?}", blue("УВЕЛИЧЕНИЕ ДЛИННЫ ПАРОЛЯ:"), green(len_uvelichenie.clone()));
-    println!("{}{:?}", blue("АДРЕСОВ ЗАГРУЖЕННО:"), green(database.len()));
+    println!("{}{}{}", blue("КОЛИЧЕСТВО ЯДЕР ПРОЦЕССОРА:"), green(cpu_core), blue(format!("/{count_cpu}")));
+    println!("{}{}", blue("ДЛИНА ПАРОЛЯ:"), green(dlinn_a_pasvord));
+    println!("{}{}", blue("АЛФАВИТ:"), green(&alvabet));
+    println!("{}{}", blue("ДОБАВЛЕНИЕ ПРОБЕЛА:"), green(probel.clone()));
+    println!("{}{}", blue("УВЕЛИЧЕНИЕ ДЛИННЫ ПАРОЛЯ:"), green(len_uvelichenie.clone()));
+    println!("{}{}", blue("АДРЕСОВ ЗАГРУЖЕННО:"), green(database.len()));
+    println!("{}{}", blue("НАЧАЛО ПЕРЕБОРА:"), green(start_perebor.clone()));
 
+    //главные каналы
+    let (main_sender, main_receiver) = mpsc::channel();
 
-    //получать сообщения от потоков
-    let (tx, rx) = mpsc::channel();
-
-    //если указано добавлять пробел добавим
-    let spase = if probel { " " } else { "" };
-
-    //подготавливаем данные для потока
+    // создание потоков
+    //-----------------------------------------------------------------------
+    //будет храниться список запушеных потоков(каналов для связи)
+    let mut channels = Vec::new();
     let database = Arc::new(database);
-    let alvabet = Arc::new(format!("{alvabet}{spase}"));
+    for ch in 0..cpu_core {
+        let (sender, receiver) = mpsc::channel();
+        let database_cl = database.clone();
 
-    //запускаем отдельный поток, а этот будет слушать и инфу отображать
-    let clone_db = database.clone();
-    let clone_alvabet = alvabet.clone();
-    let tx = tx.clone();
-    task::spawn_blocking(move || {
-        process(&clone_db, tx, dlinn_a_pasvord, &clone_alvabet, len_uvelichenie);
-    });
+        let main_sender = main_sender.clone();
 
+        let ice_library = ice_library::IceLibrary::new();
+        ice_library.init_secp256_lib();
 
-    //отображает инфу в однy строку(обновляемую)
-    let mut stdout = stdout();
-    for received in rx {
-        let list: Vec<&str> = received.split(",").collect();
-        let speed = list[0].to_string().parse::<u64>().unwrap();
-        print!("{}\r{}", BACKSPACE, green(format!("SPEED:{speed}/s|{}", list[1])));
-        stdout.flush().unwrap();
+        // Поток для выполнения задач
+        thread::spawn(move || {
+            loop {
+                let (h, password_string) = receiver.recv().unwrap();
+
+                //получаем публичный ключ
+                let pk_u = ice_library.privatekey_to_publickey(&h);//тут компухтер напрягаеться
+                let pk_c = ice_library.publickey_uncompres_to_compres(&pk_u);
+
+                //получем из них хеш160
+                let h160c = hash160(&*pk_c.to_vec()).0;
+                let h160u = hash160(&*pk_u.to_vec()).0;
+
+                //проверка наличия в базе
+                if database_cl.contains(&h160u.to_vec()) {
+                    let address = get_legacy(h160u, 0x00);
+                    let private_key_u = hex_to_wif_uncompressed(&h);
+                    print_and_save(hex::encode(&h), &private_key_u, address, &password_string);
+                }
+                if database_cl.contains(&h160c.to_vec()) {
+                    let address = get_legacy(h160c, 0x00);
+                    let private_key_c = hex_to_wif_compressed(&h);
+                    print_and_save(hex::encode(&h), &private_key_c, address, &password_string);
+                }
+
+                //шлём поток
+                main_sender.send(ch).unwrap();
+            }
+        });
+        //зажигание хз костыль получился
+        sender.send((vec![], "".to_string())).unwrap();
+        channels.push(sender);
     }
-}
+    //------------------------------------------------------------------------------
 
-fn process(file_content: &Arc<HashSet<Vec<u8>>>, tx: Sender<String>, dlinn_a_pasvord: usize, alvabet: &Arc<String>, len_uvelichenie: bool) {
+    //для измерения скорости
     let mut start = Instant::now();
     let mut speed: u32 = 0;
-
-    let mut len = dlinn_a_pasvord;
 
     let ice_library = ice_library::IceLibrary::new();
     ice_library.init_secp256_lib();
 
-    let mut current_combination = vec![0; len];
+    //если указано добавлять пробел добавим
+    let spase = if probel { " " } else { "" };
+    let alvabet = format!("{alvabet}{spase}");
 
     let charset_chars: Vec<char> = alvabet.chars().collect();
     let charset_len = charset_chars.len();
+    //состовляем начальную позицию
+    let mut current_combination= vec![0; dlinn_a_pasvord];
+    for d in 0..dlinn_a_pasvord {
+        let position = charset_chars.iter().position(|&ch| ch == start_perebor.chars().nth(d).unwrap_or(charset_chars[0])).unwrap();
+        current_combination[d]= position;
+    };
 
-    loop {
-        // жпт соченил
-        let password_string: String = String::from_iter(
+    //слушаем ответы потков и если есть шлём новую задачу
+    for received in main_receiver {
+        let ch = received;
+
+        // следующая комбинация пароля
+        let password_string = String::from_iter(
             current_combination.iter().map(|&idx| charset_chars[idx])
         );
 
-        // Проверяем пароль, хешеруем
-        let h = Sha256::digest(&password_string).to_vec();
-
-        // перегоняем в паблик сжатый и нет
-        let pk_u = ice_library.privatekey_to_publickey(&h);
-        let pk_c = ice_library.publickey_uncompres_to_compres(&pk_u);
-
-        // получем из них хеш160
-        let h160c = hash160(&*pk_c.to_vec()).0;
-        let h160u = hash160(&*pk_u.to_vec()).0;
-
-        //проверка наличия в базе
-        if file_content.contains(&h160u.to_vec()) {
-            let address = get_legacy(h160u, 0x00);
-            let private_key_u = hex_to_wif_uncompressed(&h);
-            print_and_save(hex::encode(&h), &private_key_u, address, &password_string);
-        }
-        if file_content.contains(&h160c.to_vec()) {
-            let address = get_legacy(h160c, 0x00);
-            let private_key_c = hex_to_wif_compressed(&h);
-            print_and_save(hex::encode(&h), &private_key_c, address, &password_string);
-        }
-
-        //измеряем скорость и шлём прогресс
-        speed = speed + 1;
-        if start.elapsed() >= Duration::from_secs(1) {
-            tx.send(format!("{speed},{password_string}").to_string()).unwrap();
-            start = Instant::now();
-            speed = 0;
-        }
+        // Отправляем новую в свободный канал
+        channels[ch].send((Sha256::digest(&password_string).to_vec(), password_string.clone())).unwrap();
 
         //это мне нахлабучил жпт, хрен проссыш как работает
-        let mut i = len;
+        let mut i = dlinn_a_pasvord;
         while i > 0 {
             i -= 1;
             if current_combination[i] + 1 < charset_len {
@@ -168,17 +174,26 @@ fn process(file_content: &Arc<HashSet<Vec<u8>>>, tx: Sender<String>, dlinn_a_pas
         if i == 0 && current_combination[0] == charset_len - 1 {
             //если включенно увеличение длинны увеличим иначе выйдем из цикла
             if len_uvelichenie {
-                len = len + 1;
-                current_combination = vec![0; len];
-                println!("{}{:?}", blue("ДЛИНА ПАРОЛЯ:"), green(len));
+                dlinn_a_pasvord = dlinn_a_pasvord + 1;
+                current_combination = vec![0; dlinn_a_pasvord];
+                println!("{}{:?}", blue("ДЛИНА ПАРОЛЯ:"), green(dlinn_a_pasvord));
             } else {
                 println!("{}", blue("ГОТОВО"));
                 break;
             }
         }
+
+        //измеряем скорость и шлём прогресс
+        speed = speed + 1;
+        if start.elapsed() >= Duration::from_secs(1) {
+            let mut stdout = stdout();
+            print!("{}\r{}", BACKSPACE, green(format!("SPEED:{speed}/s|{}", password_string)));
+            stdout.flush().unwrap();
+            start = Instant::now();
+            speed = 0;
+        }
     }
 }
-
 
 fn lines_from_file(filename: impl AsRef<Path>) -> io::Result<Vec<String>> {
     BufReader::new(File::open(filename)?).lines().collect()
@@ -196,22 +211,28 @@ fn add_v_file(name: &str, data: String) {
 }
 
 fn hex_to_wif_compressed(raw_hex: &Vec<u8>) -> String {
-    let mut v = [0; 38];
-    v[0] = 0x80;
-    v[1..=32].copy_from_slice(&raw_hex.as_ref());
-    v[33] = 0x01;
-    let checksum = sha256d(&v[0..=33]);
-    v[34..=37].copy_from_slice(&checksum[0..=3]);
-    v.to_base58()
+    if raw_hex.len() == 32 {
+        let mut v = [0; 38];
+        v[0] = 0x80;
+        v[1..33].copy_from_slice(&raw_hex[..]);
+        v[33] = 0x01;
+        let checksum = sha256d(&v[0..34]);
+        v[34..38].copy_from_slice(&checksum[0..4]);
+        v.to_base58()
+    } else {
+        format!("Ошибка hex меньше 64 :'{}'", hex::encode(raw_hex).to_string())
+    }
 }
 
 fn hex_to_wif_uncompressed(raw_hex: &Vec<u8>) -> String {
-    let mut v = [0; 37];
-    v[0] = 0x80;
-    v[1..=32].copy_from_slice(&raw_hex.as_ref());
-    let checksum = sha256d(&v[0..=32]);
-    v[33..37].copy_from_slice(&checksum[0..=3]);
-    v.to_base58()
+    if raw_hex.len() == 32 {
+        let mut v = [0; 37];
+        v[0] = 0x80;
+        v[1..33].copy_from_slice(&raw_hex[..]);
+        let checksum = sha256d(&v[0..33]);
+        v[33..37].copy_from_slice(&checksum[0..4]);
+        v.to_base58()
+    } else { format!("Ошибка hex меньше 64 :'{}'", hex::encode(raw_hex).to_string()) }
 }
 
 fn print_and_save(hex: String, key: &String, addres: String, password_string: &String) {
@@ -228,7 +249,7 @@ fn print_and_save(hex: String, key: &String, addres: String, password_string: &S
 
 fn sha256d(data: &[u8]) -> Vec<u8> {
     let first_hash = Sha256::digest(data);
-    let second_hash = Sha256::digest(&first_hash);
+    let second_hash = Sha256::digest(first_hash);
     second_hash.to_vec()
 }
 

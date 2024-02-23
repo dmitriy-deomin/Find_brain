@@ -1,8 +1,10 @@
 pub fn get_conf_text()->String{
-    let t = "3 -Длинна пароля \n\
+    let t = "3 -Количество ядер процессора \n\
+    7 -Длинна пароля \n\
     abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890.,-=*/+{}[]<>!@#$%^&()_ -Алфавит\n\
     1 -Увеличивать длинну пароля в конце(0/1)\n\
     1 -Добавить пробел(0/1)\n\
+    aaaaaaa -Начало перебора\n\
     ---------------------------\n\
     Описание:\n\
     -Поиск ведеться по старым кошелькам сжатому и несжатому (1...)\n\
@@ -17,7 +19,7 @@ pub fn get_conf_text()->String{
     -Задонатить:\n\
       -BTC   bc1qg89l3580w7zgqkc54kufgpdyk3ur88d772l9y0\n\
       -KASPA kaspa:qqp88q66fm3r7fe9usl36kuz9hfrw30huhjtwat8ecxdusvkh80c7zfvz6r9v\n\
-      -QIWI  https://qiwi.com/n/DEOMINDMITRIY\n\
+      -YMoney  4100117516906765 DEOMINDMITRIY\n\
     ".to_string();
     t.to_string()
 }

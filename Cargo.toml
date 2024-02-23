@@ -1,6 +1,6 @@
 [package]
 name = "Find_brain"
-version = "0.0.3"
+version = "0.0.5"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -16,10 +16,13 @@ console = "0.15.7"
 
 hex = "0.4.3"
 base58 = "0.2.0"
-sha2 = "0.10.8"
+
+sha2 = "0.11.0-pre.3"
+
 sv = "0.2.2"
 tokio = { version = "1.36.0", features = ["rt", "rt-multi-thread", "macros"] }
 itertools = "0.12.1"
+num_cpus = "1.16.0"
 
 #это нужно для иконки
 [target.'cfg(windows)'.build-dependencies]
