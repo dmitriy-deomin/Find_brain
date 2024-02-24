@@ -1,6 +1,6 @@
-use std::collections::HashSet;
 use std::fs::{File, OpenOptions};
 use std::{io, thread};
+use std::collections::HashSet;
 use std::io::{BufRead, BufReader, stdout, Write};
 use std::path::Path;
 use std::sync::{Arc, mpsc};
@@ -15,6 +15,7 @@ use sha2::{Digest, Sha256};
 mod ice_library;
 mod color;
 mod data;
+mod bloom;
 
 const BACKSPACE: char = 8u8 as char;
 const FILE_CONFIG: &str = "confBrain.txt";
@@ -66,6 +67,8 @@ async fn main() {
         database.insert(a.to_vec());
     }
     //-----------------------------------------------------------------------
+    //если блум есть загрузим его
+   // let database = bloom::load_bloom();
 
     println!("{}{}{}", blue("КОЛИЧЕСТВО ЯДЕР ПРОЦЕССОРА:"), green(cpu_core), blue(format!("/{count_cpu}")));
     println!("{}{}", blue("ДЛИНА ПАРОЛЯ:"), green(dlinn_a_pasvord));
@@ -105,7 +108,7 @@ async fn main() {
                 let h160c = hash160(&*pk_c.to_vec()).0;
                 let h160u = hash160(&*pk_u.to_vec()).0;
 
-                //проверка наличия в базе
+                // //проверка наличия в базе
                 if database_cl.contains(&h160u.to_vec()) {
                     let address = get_legacy(h160u, 0x00);
                     let private_key_u = hex_to_wif_uncompressed(&h);
@@ -121,7 +124,7 @@ async fn main() {
                 main_sender.send(ch).unwrap();
             }
         });
-        //зажигание хз костыль получился
+        //зажигание хз костыль получился(выполняеться один раз при запуске потока)
         sender.send((vec![], "".to_string())).unwrap();
         channels.push(sender);
     }
@@ -131,8 +134,8 @@ async fn main() {
     let mut start = Instant::now();
     let mut speed: u32 = 0;
 
-    let ice_library = ice_library::IceLibrary::new();
-    ice_library.init_secp256_lib();
+    let ice = ice_library::IceLibrary::new();
+    ice.init_secp256_lib();
 
     //если указано добавлять пробел добавим
     let spase = if probel { " " } else { "" };
