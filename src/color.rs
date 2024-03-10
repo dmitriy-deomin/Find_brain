@@ -17,11 +17,11 @@ pub fn cyan(text:impl Display) -> StyledObject<String> {
     style(text.to_string()).cyan()
 }
 
-pub fn color_bool(b: bool) ->String{
-    let colored= if b{
-        format!("{}",style("true").green())
-    }else {
-        format!("{}",style("false").red())
-    };
-    colored
-}
+// pub fn color_bool(b: bool) ->String{
+//     let colored= if b{
+//         format!("{}",style("true").green())
+//     }else {
+//         format!("{}",style("false").red())
+//     };
+//     colored
+// }

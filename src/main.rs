@@ -11,7 +11,6 @@ use sv::util::{hash160};
 use crate::color::{blue, cyan, green, magenta, red};
 
 use rustils::parse::boolean::string_to_bool;
-use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 mod ice_library;
@@ -50,8 +49,13 @@ async fn main() {
     let probel = string_to_bool(first_word(&conf[4].to_string()).to_string());
     let start_perebor = first_word(&conf[5].to_string()).to_string();
     let mode: usize = first_word(&conf[6].to_string()).to_string().parse::<usize>().unwrap();
-    let comb_perebor_left: usize = first_word(&conf[7].to_string()).to_string().parse::<usize>().unwrap();
+    let comb_perebor_left_: usize = first_word(&conf[7].to_string()).to_string().parse::<usize>().unwrap();
     //---------------------------------------------------------------------
+
+    //если укажут меньше или 0
+    let comb_perebor_left = if comb_perebor_left_ >0{
+        comb_perebor_left_
+    }else { 1 };
 
     //читаем файл с адресами и конвертируем их в h160 для базы
     //-----------------------------------------------------------------
@@ -69,7 +73,7 @@ async fn main() {
     for (index,address) in file_content.iter().enumerate() {
         let binding = match address.from_base58() {
             Ok(value) => value,
-            Err(err) => {
+            Err(_err) => {
                 eprintln!("{}",red(format!("ОШИБКА ДЕКОДИРОВАНИЯ В base58 адресс:{}/строка:{}", address,index+1)));
                 continue; // Пропускаем этот адрес и переходим к следующему
             }
@@ -96,7 +100,7 @@ async fn main() {
     println!("{}{}", blue("НАЧАЛО ПЕРЕБОРА:"), green(start_perebor.clone()));
     println!("{}{}", blue("РЕЖИМ ГЕНЕРАЦИИ ПАРОЛЯ:"), green(get_mode_text(mode)));
     if mode==2{
-        println!("{}{}", blue("КОЛИЧЕСТВО ЗНАКОВ ПЕРЕБОРА СЛЕВА:"), green(get_mode_text(comb_perebor_left)));
+        println!("{}{}", blue("КОЛИЧЕСТВО ЗНАКОВ ПЕРЕБОРА СЛЕВА:"), green(comb_perebor_left));
     }
 
 
