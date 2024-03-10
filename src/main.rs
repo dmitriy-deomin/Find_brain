@@ -66,12 +66,21 @@ async fn main() {
     //хешируем
     let mut database = HashSet::new();
     for address in file_content.iter() {
-        let binding = address.from_base58().unwrap();
-        // Создание пустого массива [u8; 20]
+        let binding = match address.from_base58() {
+            Ok(value) => value,
+            Err(err) => {
+                eprintln!("ОШИБКА ДЕКОДИРОВАНИЯ В base58: {}", address);
+                continue; // Пропускаем этот адрес и переходим к следующему
+            }
+        };
+
         let mut a: [u8; 20] = [0; 20];
-        // Копирование элементов из среза в массив фиксированного размера
-        a.copy_from_slice(&binding.as_slice()[1..21]);
-        database.insert(a);
+        if binding.len() >= 21 {
+            a.copy_from_slice(&binding.as_slice()[1..21]);
+            database.insert(a);
+        } else {
+            eprintln!("ОШИБКА,АДРЕСС НЕ ВАЛИДЕН {}",address);
+        }
     }
     //-----------------------------------------------------------------------
     //если блум есть загрузим его

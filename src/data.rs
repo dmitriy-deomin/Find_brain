@@ -20,7 +20,6 @@ pub fn get_conf_text()->String{
     -Задонатить:\n\
       -BTC   bc1qg89l3580w7zgqkc54kufgpdyk3ur88d772l9y0\n\
       -KASPA kaspa:qqp88q66fm3r7fe9usl36kuz9hfrw30huhjtwat8ecxdusvkh80c7zfvz6r9v\n\
-      -YMoney  4100117516906765 DEOMINDMITRIY\n\
     ".to_string();
     t.to_string()
 }
