@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use base58::{FromBase58, ToBase58};
 use rand::Rng;
 use sv::util::{hash160};
-use crate::color::{blue, cyan, green, magenta};
+use crate::color::{blue, cyan, green, magenta, red};
 
 use rustils::parse::boolean::string_to_bool;
 use serde::{Deserialize, Serialize};
@@ -50,6 +50,7 @@ async fn main() {
     let probel = string_to_bool(first_word(&conf[4].to_string()).to_string());
     let start_perebor = first_word(&conf[5].to_string()).to_string();
     let mode: usize = first_word(&conf[6].to_string()).to_string().parse::<usize>().unwrap();
+    let comb_perebor_left: usize = first_word(&conf[7].to_string()).to_string().parse::<usize>().unwrap();
     //---------------------------------------------------------------------
 
     //читаем файл с адресами и конвертируем их в h160 для базы
@@ -65,11 +66,11 @@ async fn main() {
 
     //хешируем
     let mut database = HashSet::new();
-    for address in file_content.iter() {
+    for (index,address) in file_content.iter().enumerate() {
         let binding = match address.from_base58() {
             Ok(value) => value,
             Err(err) => {
-                eprintln!("ОШИБКА ДЕКОДИРОВАНИЯ В base58: {}", address);
+                eprintln!("{}",red(format!("ОШИБКА ДЕКОДИРОВАНИЯ В base58 адресс:{}/строка:{}", address,index+1)));
                 continue; // Пропускаем этот адрес и переходим к следующему
             }
         };
@@ -79,7 +80,7 @@ async fn main() {
             a.copy_from_slice(&binding.as_slice()[1..21]);
             database.insert(a);
         } else {
-            eprintln!("ОШИБКА,АДРЕСС НЕ ВАЛИДЕН {}",address);
+            eprintln!("{}",red(format!("ОШИБКА,АДРЕСС НЕ ВАЛИДЕН адресс:{}/строка:{}",address,index+1)));
         }
     }
     //-----------------------------------------------------------------------
@@ -94,6 +95,10 @@ async fn main() {
     println!("{}{}", blue("АДРЕСОВ ЗАГРУЖЕННО:"), green(database.len()));
     println!("{}{}", blue("НАЧАЛО ПЕРЕБОРА:"), green(start_perebor.clone()));
     println!("{}{}", blue("РЕЖИМ ГЕНЕРАЦИИ ПАРОЛЯ:"), green(get_mode_text(mode)));
+    if mode==2{
+        println!("{}{}", blue("КОЛИЧЕСТВО ЗНАКОВ ПЕРЕБОРА СЛЕВА:"), green(get_mode_text(comb_perebor_left)));
+    }
+
 
     //главные каналы
     let (main_sender, main_receiver) = mpsc::channel();
@@ -165,12 +170,22 @@ async fn main() {
 
     let charset_chars: Vec<char> = alvabet.chars().collect();
     let charset_len = charset_chars.len();
+
     //состовляем начальную позицию
     let mut current_combination = vec![0; dlinn_a_pasvord];
     for d in 0..dlinn_a_pasvord {
-        let position = charset_chars.iter().position(|&ch| ch == start_perebor.chars().nth(d).unwrap_or(charset_chars[0])).unwrap();
+        let position = match start_perebor.chars().nth(d) {
+            Some(ch) => {
+                // Находим позицию символа в charset_chars
+                charset_chars.iter().position(|&c| c == ch).unwrap_or_else(|| {
+                    eprintln!("{}",red(format!("Знак:{} из *начала перебора* ненайден, установлен первый из алфавита",ch)));
+                    0
+                })
+            }
+            None => { 0 }
+        };
         current_combination[d] = position;
-    };
+    }
 
     //слушаем ответы потков и если есть шлём новую задачу
     for received in main_receiver {
@@ -184,6 +199,7 @@ async fn main() {
         // Отправляем новую в свободный канал
         channels[ch].send((Sha256::digest(&password_string).to_vec(), password_string.clone())).unwrap();
 
+        //перебор
         if mode==0{
             let mut i = dlinn_a_pasvord;
             while i > 0 {
@@ -207,9 +223,38 @@ async fn main() {
                     break;
                 }
             }
-        }else if mode==1 {
+        }
+        //рандом
+        if mode==1 {
             for f in 0..dlinn_a_pasvord {
                 current_combination[f]= rng.gen_range(0..charset_len);
+            }
+        }
+
+        //комбенированный
+        if mode==2{
+            //будем переберать слева указаное количество
+            let mut i = comb_perebor_left;
+            while i > 0 {
+                i -= 1;
+                if current_combination[i] + 1 < charset_len {
+                    current_combination[i] += 1;
+                    break;
+                } else {
+                    current_combination[i] = 0;
+                }
+            }
+
+            if i == 0 && current_combination[0] == charset_len - 1 {
+                for f in 0..dlinn_a_pasvord {
+                    //заполняем слева начальными значениями
+                    if f<comb_perebor_left{
+                        current_combination[f]= 0;
+                    }else {
+                        //остальные рандомно
+                        current_combination[f]= rng.gen_range(0..charset_len);
+                    }
+                }
             }
         }
 
@@ -229,6 +274,7 @@ fn get_mode_text(mode:usize)->String{
     match mode {
         0=>"ПОСЛЕДОВАТЕЛЬНЫЙ ПЕРЕБОР".to_string(),
         1=> "РАНДОМ".to_string(),
+        2=> "КОМБИНИРОВАННЫЙ".to_string(),
         _ => { "ХЗ".to_string() }
     }
 }
