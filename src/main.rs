@@ -6,10 +6,12 @@ use std::path::Path;
 use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 use base58::{FromBase58, ToBase58};
+use rand::Rng;
 use sv::util::{hash160};
 use crate::color::{blue, cyan, green, magenta};
 
 use rustils::parse::boolean::string_to_bool;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 mod ice_library;
@@ -19,6 +21,7 @@ mod bloom;
 
 const BACKSPACE: char = 8u8 as char;
 const FILE_CONFIG: &str = "confBrain.txt";
+
 
 #[tokio::main]
 async fn main() {
@@ -46,6 +49,7 @@ async fn main() {
     let len_uvelichenie = string_to_bool(first_word(&conf[3].to_string()).to_string());
     let probel = string_to_bool(first_word(&conf[4].to_string()).to_string());
     let start_perebor = first_word(&conf[5].to_string()).to_string();
+    let mode: usize = first_word(&conf[6].to_string()).to_string().parse::<usize>().unwrap();
     //---------------------------------------------------------------------
 
     //читаем файл с адресами и конвертируем их в h160 для базы
@@ -63,12 +67,15 @@ async fn main() {
     let mut database = HashSet::new();
     for address in file_content.iter() {
         let binding = address.from_base58().unwrap();
-        let a = &binding.as_slice()[1..=20];
-        database.insert(a.to_vec());
+        // Создание пустого массива [u8; 20]
+        let mut a: [u8; 20] = [0; 20];
+        // Копирование элементов из среза в массив фиксированного размера
+        a.copy_from_slice(&binding.as_slice()[1..21]);
+        database.insert(a);
     }
     //-----------------------------------------------------------------------
     //если блум есть загрузим его
-   // let database = bloom::load_bloom();
+    // let database = bloom::load_bloom();
 
     println!("{}{}{}", blue("КОЛИЧЕСТВО ЯДЕР ПРОЦЕССОРА:"), green(cpu_core), blue(format!("/{count_cpu}")));
     println!("{}{}", blue("ДЛИНА ПАРОЛЯ:"), green(dlinn_a_pasvord));
@@ -77,6 +84,7 @@ async fn main() {
     println!("{}{}", blue("УВЕЛИЧЕНИЕ ДЛИННЫ ПАРОЛЯ:"), green(len_uvelichenie.clone()));
     println!("{}{}", blue("АДРЕСОВ ЗАГРУЖЕННО:"), green(database.len()));
     println!("{}{}", blue("НАЧАЛО ПЕРЕБОРА:"), green(start_perebor.clone()));
+    println!("{}{}", blue("РЕЖИМ ГЕНЕРАЦИИ ПАРОЛЯ:"), green(get_mode_text(mode)));
 
     //главные каналы
     let (main_sender, main_receiver) = mpsc::channel();
@@ -105,19 +113,22 @@ async fn main() {
                 let pk_c = ice_library.publickey_uncompres_to_compres(&pk_u);
 
                 //получем из них хеш160
-                let h160c = hash160(&*pk_c.to_vec()).0;
-                let h160u = hash160(&*pk_u.to_vec()).0;
+                let h160c= hash160(&pk_c[0..]).0;
 
-                // //проверка наличия в базе
-                if database_cl.contains(&h160u.to_vec()) {
-                    let address = get_legacy(h160u, 0x00);
-                    let private_key_u = hex_to_wif_uncompressed(&h);
-                    print_and_save(hex::encode(&h), &private_key_u, address, &password_string);
-                }
-                if database_cl.contains(&h160c.to_vec()) {
+                if database_cl.contains(&h160c) {
                     let address = get_legacy(h160c, 0x00);
                     let private_key_c = hex_to_wif_compressed(&h);
                     print_and_save(hex::encode(&h), &private_key_c, address, &password_string);
+                }
+
+                //получем из них хеш160
+                let h160u = hash160(&pk_u[0..]).0;
+
+                // //проверка наличия в базе
+                if database_cl.contains(&h160u) {
+                    let address = get_legacy(h160u, 0x00);
+                    let private_key_u = hex_to_wif_uncompressed(&h);
+                    print_and_save(hex::encode(&h), &private_key_u, address, &password_string);
                 }
 
                 //шлём поток
@@ -137,6 +148,8 @@ async fn main() {
     let ice = ice_library::IceLibrary::new();
     ice.init_secp256_lib();
 
+    let mut rng = rand::thread_rng();
+
     //если указано добавлять пробел добавим
     let spase = if probel { " " } else { "" };
     let alvabet = format!("{alvabet}{spase}");
@@ -144,10 +157,10 @@ async fn main() {
     let charset_chars: Vec<char> = alvabet.chars().collect();
     let charset_len = charset_chars.len();
     //состовляем начальную позицию
-    let mut current_combination= vec![0; dlinn_a_pasvord];
+    let mut current_combination = vec![0; dlinn_a_pasvord];
     for d in 0..dlinn_a_pasvord {
         let position = charset_chars.iter().position(|&ch| ch == start_perebor.chars().nth(d).unwrap_or(charset_chars[0])).unwrap();
-        current_combination[d]= position;
+        current_combination[d] = position;
     };
 
     //слушаем ответы потков и если есть шлём новую задачу
@@ -162,27 +175,32 @@ async fn main() {
         // Отправляем новую в свободный канал
         channels[ch].send((Sha256::digest(&password_string).to_vec(), password_string.clone())).unwrap();
 
-        //это мне нахлабучил жпт, хрен проссыш как работает
-        let mut i = dlinn_a_pasvord;
-        while i > 0 {
-            i -= 1;
-            if current_combination[i] + 1 < charset_len {
-                current_combination[i] += 1;
-                break;
-            } else {
-                current_combination[i] = 0;
+        if mode==0{
+            let mut i = dlinn_a_pasvord;
+            while i > 0 {
+                i -= 1;
+                if current_combination[i] + 1 < charset_len {
+                    current_combination[i] += 1;
+                    break;
+                } else {
+                    current_combination[i] = 0;
+                }
             }
-        }
 
-        if i == 0 && current_combination[0] == charset_len - 1 {
-            //если включенно увеличение длинны увеличим иначе выйдем из цикла
-            if len_uvelichenie {
-                dlinn_a_pasvord = dlinn_a_pasvord + 1;
-                current_combination = vec![0; dlinn_a_pasvord];
-                println!("{}{:?}", blue("ДЛИНА ПАРОЛЯ:"), green(dlinn_a_pasvord));
-            } else {
-                println!("{}", blue("ГОТОВО"));
-                break;
+            if i == 0 && current_combination[0] == charset_len - 1 {
+                //если включенно увеличение длинны увеличим иначе выйдем из цикла
+                if len_uvelichenie {
+                    dlinn_a_pasvord = dlinn_a_pasvord + 1;
+                    current_combination = vec![0; dlinn_a_pasvord];
+                    println!("{}{:?}", blue("ДЛИНА ПАРОЛЯ:"), green(dlinn_a_pasvord));
+                } else {
+                    println!("{}", blue("ГОТОВО"));
+                    break;
+                }
+            }
+        }else if mode==1 {
+            for f in 0..dlinn_a_pasvord {
+                current_combination[f]= rng.gen_range(0..charset_len);
             }
         }
 
@@ -195,6 +213,14 @@ async fn main() {
             start = Instant::now();
             speed = 0;
         }
+    }
+}
+
+fn get_mode_text(mode:usize)->String{
+    match mode {
+        0=>"ПОСЛЕДОВАТЕЛЬНЫЙ ПЕРЕБОР".to_string(),
+        1=> "РАНДОМ".to_string(),
+        _ => { "ХЗ".to_string() }
     }
 }
 
