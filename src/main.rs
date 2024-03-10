@@ -95,9 +95,11 @@ async fn main() {
     println!("{}{}", blue("ДЛИНА ПАРОЛЯ:"), green(dlinn_a_pasvord));
     println!("{}{}", blue("АЛФАВИТ:"), green(&alvabet));
     println!("{}{}", blue("ДОБАВЛЕНИЕ ПРОБЕЛА:"), green(probel.clone()));
-    println!("{}{}", blue("УВЕЛИЧЕНИЕ ДЛИННЫ ПАРОЛЯ:"), green(len_uvelichenie.clone()));
+    if mode==0{
+        println!("{}{}", blue("УВЕЛИЧЕНИЕ ДЛИННЫ ПАРОЛЯ:"), green(len_uvelichenie.clone()));
+        println!("{}{}", blue("НАЧАЛО ПЕРЕБОРА:"), green(start_perebor.clone()));
+    }
     println!("{}{}", blue("АДРЕСОВ ЗАГРУЖЕННО:"), green(database.len()));
-    println!("{}{}", blue("НАЧАЛО ПЕРЕБОРА:"), green(start_perebor.clone()));
     println!("{}{}", blue("РЕЖИМ ГЕНЕРАЦИИ ПАРОЛЯ:"), green(get_mode_text(mode)));
     if mode==2{
         println!("{}{}", blue("КОЛИЧЕСТВО ЗНАКОВ ПЕРЕБОРА СЛЕВА:"), green(comb_perebor_left));
@@ -177,18 +179,21 @@ async fn main() {
 
     //состовляем начальную позицию
     let mut current_combination = vec![0; dlinn_a_pasvord];
-    for d in 0..dlinn_a_pasvord {
-        let position = match start_perebor.chars().nth(d) {
-            Some(ch) => {
-                // Находим позицию символа в charset_chars
-                charset_chars.iter().position(|&c| c == ch).unwrap_or_else(|| {
-                    eprintln!("{}",red(format!("Знак:{} из *начала перебора* ненайден, установлен первый из алфавита",ch)));
-                    0
-                })
-            }
-            None => { 0 }
-        };
-        current_combination[d] = position;
+    //заполняем страртовыми значениями
+    if mode == 0{
+        for d in 0..dlinn_a_pasvord {
+            let position = match start_perebor.chars().nth(d) {
+                Some(ch) => {
+                    // Находим позицию символа в charset_chars
+                    charset_chars.iter().position(|&c| c == ch).unwrap_or_else(|| {
+                        eprintln!("{}",red(format!("Знак:{} из *начала перебора* ненайден, установлен первый из алфавита",ch)));
+                        0
+                    })
+                }
+                None => { 0 }
+            };
+            current_combination[d] = position;
+        }
     }
 
     //слушаем ответы потков и если есть шлём новую задачу
