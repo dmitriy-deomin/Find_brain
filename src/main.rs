@@ -126,7 +126,10 @@ async fn main() {
         // Поток для выполнения задач
         thread::spawn(move || {
             loop {
-                let (h, password_string) = receiver.recv().unwrap();
+                let password_string = receiver.recv().unwrap();
+
+                //получаем из пароля хекс
+                let h = Sha256::digest(&password_string).to_vec();
 
                 //получаем публичный ключ
                 let pk_u = ice_library.privatekey_to_publickey(&h);//тут компухтер напрягаеться
@@ -156,7 +159,7 @@ async fn main() {
             }
         });
         //зажигание хз костыль получился(выполняеться один раз при запуске потока)
-        sender.send((vec![], "".to_string())).unwrap();
+        sender.send("".to_string()).unwrap();
         channels.push(sender);
     }
     //------------------------------------------------------------------------------
@@ -206,7 +209,7 @@ async fn main() {
         );
 
         // Отправляем новую в свободный канал
-        channels[ch].send((Sha256::digest(&password_string).to_vec(), password_string.clone())).unwrap();
+        channels[ch].send(password_string.clone()).unwrap();
 
         //перебор
         if mode==0{
