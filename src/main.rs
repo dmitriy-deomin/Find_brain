@@ -53,9 +53,9 @@ async fn main() {
     //---------------------------------------------------------------------
 
     //если укажут меньше или 0
-    let comb_perebor_left = if comb_perebor_left_ >0{
+    let comb_perebor_left = if comb_perebor_left_ > 0 {
         comb_perebor_left_
-    }else { 1 };
+    } else { 1 };
 
     //читаем файл с адресами и конвертируем их в h160 для базы
     //-----------------------------------------------------------------
@@ -70,11 +70,11 @@ async fn main() {
 
     //хешируем
     let mut database = HashSet::new();
-    for (index,address) in file_content.iter().enumerate() {
+    for (index, address) in file_content.iter().enumerate() {
         let binding = match address.from_base58() {
             Ok(value) => value,
             Err(_err) => {
-                eprintln!("{}",red(format!("ОШИБКА ДЕКОДИРОВАНИЯ В base58 адресс:{}/строка:{}", address,index+1)));
+                eprintln!("{}", red(format!("ОШИБКА ДЕКОДИРОВАНИЯ В base58 адресс:{}/строка:{}", address, index + 1)));
                 continue; // Пропускаем этот адрес и переходим к следующему
             }
         };
@@ -84,7 +84,7 @@ async fn main() {
             a.copy_from_slice(&binding.as_slice()[1..21]);
             database.insert(a);
         } else {
-            eprintln!("{}",red(format!("ОШИБКА,АДРЕСС НЕ ВАЛИДЕН адресс:{}/строка:{}",address,index+1)));
+            eprintln!("{}", red(format!("ОШИБКА,АДРЕСС НЕ ВАЛИДЕН адресс:{}/строка:{}", address, index + 1)));
         }
     }
     //-----------------------------------------------------------------------
@@ -93,15 +93,19 @@ async fn main() {
 
     println!("{}{}{}", blue("КОЛИЧЕСТВО ЯДЕР ПРОЦЕССОРА:"), green(cpu_core), blue(format!("/{count_cpu}")));
     println!("{}{}", blue("ДЛИНА ПАРОЛЯ:"), green(dlinn_a_pasvord));
-    println!("{}{}", blue("АЛФАВИТ:"), green(&alvabet));
+    if alvabet=="0"{
+        println!("{}{}", blue("АЛФАВИТ:"), green("ВСЕ ВОЗМОЖНЫЕ"));
+    }else {
+        println!("{}{}", blue("АЛФАВИТ:"), green(&alvabet));
+    }
     println!("{}{}", blue("ДОБАВЛЕНИЕ ПРОБЕЛА:"), green(probel.clone()));
-    if mode==0{
+    if mode == 0 {
         println!("{}{}", blue("УВЕЛИЧЕНИЕ ДЛИННЫ ПАРОЛЯ:"), green(len_uvelichenie.clone()));
         println!("{}{}", blue("НАЧАЛО ПЕРЕБОРА:"), green(start_perebor.clone()));
     }
     println!("{}{}", blue("АДРЕСОВ ЗАГРУЖЕННО:"), green(database.len()));
     println!("{}{}", blue("РЕЖИМ ГЕНЕРАЦИИ ПАРОЛЯ:"), green(get_mode_text(mode)));
-    if mode==2{
+    if mode == 2 {
         println!("{}{}", blue("КОЛИЧЕСТВО ЗНАКОВ ПЕРЕБОРА СЛЕВА:"), green(comb_perebor_left));
     }
 
@@ -126,7 +130,7 @@ async fn main() {
         // Поток для выполнения задач
         thread::spawn(move || {
             loop {
-                let password_string = receiver.recv().unwrap();
+                let password_string:String = receiver.recv().unwrap_or(" ".to_string());
 
                 //получаем из пароля хекс
                 let h = Sha256::digest(&password_string).to_vec();
@@ -136,7 +140,7 @@ async fn main() {
                 let pk_c = ice_library.publickey_uncompres_to_compres(&pk_u);
 
                 //получем из них хеш160
-                let h160c= hash160(&pk_c[0..]).0;
+                let h160c = hash160(&pk_c[0..]).0;
 
                 if database_cl.contains(&h160c) {
                     let address = get_legacy(h160c, 0x00);
@@ -168,10 +172,9 @@ async fn main() {
     let mut start = Instant::now();
     let mut speed: u32 = 0;
 
-    let ice = ice_library::IceLibrary::new();
-    ice.init_secp256_lib();
-
     let mut rng = rand::thread_rng();
+
+    let alfabet_all = if alvabet=="0".to_string(){ true}else { false };
 
     //если указано добавлять пробел добавим
     let spase = if probel { " " } else { "" };
@@ -183,13 +186,14 @@ async fn main() {
     //состовляем начальную позицию
     let mut current_combination = vec![0; dlinn_a_pasvord];
     //заполняем страртовыми значениями
-    if mode == 0{
+    if mode == 0 {
         for d in 0..dlinn_a_pasvord {
             let position = match start_perebor.chars().nth(d) {
                 Some(ch) => {
                     // Находим позицию символа в charset_chars
                     charset_chars.iter().position(|&c| c == ch).unwrap_or_else(|| {
-                        eprintln!("{}",red(format!("Знак:{} из *начала перебора* ненайден, установлен первый из алфавита",ch)));
+                        let c = if alfabet_all{ char::from_u32(0).unwrap() }else { ch };
+                        eprintln!("{}", red(format!("Знак:{} из *начала перебора* ненайден, установлен первый из алфавита", c)));
                         0
                     })
                 }
@@ -199,28 +203,43 @@ async fn main() {
         }
     }
 
+
+
     //слушаем ответы потков и если есть шлём новую задачу
     for received in main_receiver {
         let ch = received;
 
-        // следующая комбинация пароля
-        let password_string = String::from_iter(
-            current_combination.iter().map(|&idx| charset_chars[idx])
-        );
+        // следующая комбинация пароля если алфавит пустой будем по всем возможным перебирать
+        let password_string: String = if alfabet_all {
+            current_combination.iter().map(|&c| char::from_u32(c as u32).unwrap_or(' ')).collect()
+        } else {
+            String::from_iter(
+                current_combination.iter().map(|&idx| charset_chars[idx])
+            )
+        };
 
         // Отправляем новую в свободный канал
         channels[ch].send(password_string.clone()).unwrap();
 
         //перебор
-        if mode==0{
+        if mode == 0 {
             let mut i = dlinn_a_pasvord;
             while i > 0 {
                 i -= 1;
-                if current_combination[i] + 1 < charset_len {
-                    current_combination[i] += 1;
-                    break;
-                } else {
-                    current_combination[i] = 0;
+                if alfabet_all{
+                    if current_combination[i] +1 < 0x10FFFF {
+                        current_combination[i] += 1;
+                        break;
+                    } else {
+                        current_combination[i] = 0;
+                    }
+                }else {
+                    if current_combination[i] + 1 < charset_len {
+                        current_combination[i] += 1;
+                        break;
+                    } else {
+                        current_combination[i] = 0;
+                    }
                 }
             }
 
@@ -237,14 +256,14 @@ async fn main() {
             }
         }
         //рандом
-        if mode==1 {
+        if mode == 1 {
             for f in 0..dlinn_a_pasvord {
-                current_combination[f]= rng.gen_range(0..charset_len);
+                current_combination[f] = rng.gen_range(0..charset_len);
             }
         }
 
-        //комбенированный
-        if mode==2{
+        //комбинированный
+        if mode == 2 {
             //будем переберать слева указаное количество
             let mut i = comb_perebor_left;
             while i > 0 {
@@ -260,11 +279,11 @@ async fn main() {
             if i == 0 && current_combination[0] == charset_len - 1 {
                 for f in 0..dlinn_a_pasvord {
                     //заполняем слева начальными значениями
-                    if f<comb_perebor_left{
-                        current_combination[f]= 0;
-                    }else {
+                    if f < comb_perebor_left {
+                        current_combination[f] = 0;
+                    } else {
                         //остальные рандомно
-                        current_combination[f]= rng.gen_range(0..charset_len);
+                        current_combination[f] = rng.gen_range(0..charset_len);
                     }
                 }
             }
@@ -282,11 +301,11 @@ async fn main() {
     }
 }
 
-fn get_mode_text(mode:usize)->String{
+fn get_mode_text(mode: usize) -> String {
     match mode {
-        0=>"ПОСЛЕДОВАТЕЛЬНЫЙ ПЕРЕБОР".to_string(),
-        1=> "РАНДОМ".to_string(),
-        2=> "КОМБИНИРОВАННЫЙ".to_string(),
+        0 => "ПОСЛЕДОВАТЕЛЬНЫЙ ПЕРЕБОР".to_string(),
+        1 => "РАНДОМ".to_string(),
+        2 => "КОМБИНИРОВАННЫЙ".to_string(),
         _ => { "ХЗ".to_string() }
     }
 }

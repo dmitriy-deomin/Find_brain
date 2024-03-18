@@ -1,7 +1,7 @@
 pub fn get_conf_text()->String{
     let t = "1 -Количество ядер процессора \n\
     9 -Длинна пароля \n\
-    abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890.,-=*/+{}[]<>!@#$%^&()_'`:;?\\~ -Алфавит\n\
+    abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890.,-=*/+{}[]<>!@#$%^&()_'`:;?\\~ -Алфавит(0-поиск по всему возможному ~ 1_114_111 шт)\n\
     1 -Увеличивать длинну пароля в конце(0/1)\n\
     1 -Добавить пробел(0/1)\n\
     aaaaaaaaa -Начало перебора\n\
