@@ -1,6 +1,5 @@
 use std::fs::{File, OpenOptions};
 use std::{io, thread};
-use std::collections::HashSet;
 use std::io::{BufRead, BufReader, stdout, Write};
 use std::path::Path;
 use std::sync::{Arc, mpsc};
@@ -57,39 +56,8 @@ async fn main() {
         comb_perebor_left_
     } else { 1 };
 
-    //читаем файл с адресами и конвертируем их в h160 для базы
-    //-----------------------------------------------------------------
-    let file_content = match lines_from_file("address.txt") {
-        Ok(file) => { file }
-        Err(_) => {
-            let dockerfile = include_str!("address.txt");
-            add_v_file("address.txt", dockerfile.to_string());
-            lines_from_file("address.txt").expect("kakoyto_pizdec")
-        }
-    };
-
-    //хешируем
-    let mut database = HashSet::new();
-    for (index, address) in file_content.iter().enumerate() {
-        let binding = match address.from_base58() {
-            Ok(value) => value,
-            Err(_err) => {
-                eprintln!("{}", red(format!("ОШИБКА ДЕКОДИРОВАНИЯ В base58 адресс:{}/строка:{}", address, index + 1)));
-                continue; // Пропускаем этот адрес и переходим к следующему
-            }
-        };
-
-        let mut a: [u8; 20] = [0; 20];
-        if binding.len() >= 21 {
-            a.copy_from_slice(&binding.as_slice()[1..21]);
-            database.insert(a);
-        } else {
-            eprintln!("{}", red(format!("ОШИБКА,АДРЕСС НЕ ВАЛИДЕН адресс:{}/строка:{}", address, index + 1)));
-        }
-    }
-    //-----------------------------------------------------------------------
     //если блум есть загрузим его
-    // let database = bloom::load_bloom();
+    let (database,inf) = bloom::load_bloom();
 
     println!("{}{}{}", blue("КОЛИЧЕСТВО ЯДЕР ПРОЦЕССОРА:"), green(cpu_core), blue(format!("/{count_cpu}")));
     println!("{}{}", blue("ДЛИНА ПАРОЛЯ:"), green(dlinn_a_pasvord));
@@ -103,7 +71,7 @@ async fn main() {
         println!("{}{}", blue("УВЕЛИЧЕНИЕ ДЛИННЫ ПАРОЛЯ:"), green(len_uvelichenie.clone()));
         println!("{}{}", blue("НАЧАЛО ПЕРЕБОРА:"), green(start_perebor.clone()));
     }
-    println!("{}{}", blue("АДРЕСОВ ЗАГРУЖЕННО:"), green(database.len()));
+    println!("{}{}", blue("АДРЕСОВ ЗАГРУЖЕННО:"), green(inf.len_btc));
     println!("{}{}", blue("РЕЖИМ ГЕНЕРАЦИИ ПАРОЛЯ:"), green(get_mode_text(mode)));
     if mode == 2 {
         println!("{}{}", blue("КОЛИЧЕСТВО ЗНАКОВ ПЕРЕБОРА СЛЕВА:"), green(comb_perebor_left));
@@ -142,7 +110,7 @@ async fn main() {
                 //получем из них хеш160
                 let h160c = hash160(&pk_c[0..]).0;
 
-                if database_cl.contains(&h160c) {
+                if database_cl.check(&h160c.to_vec()) {
                     let address = get_legacy(h160c, 0x00);
                     let private_key_c = hex_to_wif_compressed(&h);
                     print_and_save(hex::encode(&h), &private_key_c, address, &password_string);
@@ -152,7 +120,7 @@ async fn main() {
                 let h160u = hash160(&pk_u[0..]).0;
 
                 // //проверка наличия в базе
-                if database_cl.contains(&h160u) {
+                if database_cl.check(&h160u.to_vec()) {
                     let address = get_legacy(h160u, 0x00);
                     let private_key_u = hex_to_wif_uncompressed(&h);
                     print_and_save(hex::encode(&h), &private_key_u, address, &password_string);
@@ -202,8 +170,6 @@ async fn main() {
             current_combination[d] = position;
         }
     }
-
-
 
     //слушаем ответы потков и если есть шлём новую задачу
     for received in main_receiver {

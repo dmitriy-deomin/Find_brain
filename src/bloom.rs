@@ -10,14 +10,14 @@ use std::io::Write;
 use base58::FromBase58;
 
 #[derive(Debug, Serialize, Deserialize)]
-struct MetaDataBloom {
-    len_btc: u64,
+pub struct MetaDataBloom {
+    pub(crate) len_btc: u64,
     number_of_bits: u64,
     number_of_hash_functions: u32,
     sip_keys: [(u64, u64); 2],
 }
 
-pub(crate) fn load_bloom() -> Bloom<Vec<u8>> {
+pub(crate) fn load_bloom() -> (Bloom<Vec<u8>>, MetaDataBloom) {
 
     //если блум есть загружаем его
     let d_b = Path::new("data");
@@ -33,7 +33,7 @@ pub(crate) fn load_bloom() -> Bloom<Vec<u8>> {
         let database = Bloom::from_existing(&fd, mb.number_of_bits, mb.number_of_hash_functions, mb.sip_keys);
 
         println!("{}{}", blue("БАЗА ЗАГРУЖЕНА ИЗ БЛУМА:"), green(mb.len_btc));
-        database
+        (database, mb)
     } else {
         //проверяем есть ли файл(создаём) и считаем сколько строк
         //BTC-------------------------------------------------------
@@ -45,7 +45,7 @@ pub(crate) fn load_bloom() -> Bloom<Vec<u8>> {
         if fs::metadata(Path::new("btc_h160.txt")).is_ok() {
             println!("{}", red("файл btc_h160.txt уже существует,конвертирование пропущено"));
         } else {
-            println!("{}", blue("convert address to h160 and save to btc_h160.txt"));
+            println!("{}", blue("конвертирование адресов в h160 и сохранение в btc_h160.txt"));
             //конвертируем в h160 и записываем в файл рядом
             //создаём файл
             let mut file = match File::create("btc_h160.txt") {
@@ -58,18 +58,18 @@ pub(crate) fn load_bloom() -> Bloom<Vec<u8>> {
             for line in get_bufer_file("address.txt").lines() {
                 match line {
                     Ok(l) => {
-                            let binding = l.from_base58().unwrap();
-                            let h160 = &binding.as_slice()[1..=20];
-                            if let Err(e) = writeln!(file, "{:?}", h160.to_vec()) {
-                                eprintln!("Не удалось записать в файл: {}", e);
-                            }
+                        let binding = l.from_base58().unwrap();
+                        let h160 = &binding.as_slice()[1..=20];
+                        if let Err(e) = writeln!(file, "{:?}", h160.to_vec()) {
+                            eprintln!("Не удалось записать в файл: {}", e);
+                        }
                     }
                     Err(e) => { println!("error read btc.txt{}", e) }
                 }
             }
         }
-        let len_btc = get_len_find_create("btc_h160.txt");
-        println!("{}", blue(format!("convert address to h160:{}/{}", len_btc_txt, len_btc)));
+        let len_btc = get_lines("btc_h160.txt");
+        println!("{}", blue(format!("конвертировано адресов в h160:{}/{}", len_btc_txt, len_btc)));
         //----------------------------------------------------------
 
 
@@ -108,7 +108,7 @@ pub(crate) fn load_bloom() -> Bloom<Vec<u8>> {
         };
         let sj = serde_json::to_string(&save_meta_data).unwrap();
         fs::write("mdata", sj).unwrap();
-        database
+        (database, save_meta_data)
     }
 }
 
