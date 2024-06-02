@@ -12,7 +12,8 @@ impl IceLibrary {
     // Создание новой библиотеки и загрузка .dll файла
     pub fn new() -> Self {
         static LIB: Lazy<Library> = Lazy::new(|| {
-            unsafe { Library::new("ice_secp256k1.dll") }
+            unsafe {
+                if cfg!(target_os = "windows") {Library::new("ice_secp256k1.dll") } else { Library::new("ice_secp256k1.so") } }
                 .expect("Не удалось загрузить библиотеку ice_secp256k1.dll")
         });
 
