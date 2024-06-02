@@ -18,6 +18,10 @@ mod color;
 mod data;
 //mod bloom;
 
+
+extern crate secp256k1;
+use secp256k1::{PublicKey, Secp256k1, SecretKey};
+
 const BACKSPACE: char = 8u8 as char;
 const FILE_CONFIG: &str = "confBrain.txt";
 
@@ -139,6 +143,8 @@ async fn main() {
 
         //если включен режим миникей
         let prefix = if minikey { "S" } else { "" };
+        // Создание объекта secp256k1 с использованием эндоморфизма
+        let secp = Secp256k1::new();
 
         // Поток для выполнения задач
         thread::spawn(move || {
@@ -149,8 +155,18 @@ async fn main() {
                 let h = Sha256::digest(format!("{prefix}{}", password_string)).to_vec();
 
                 //получаем публичный ключ
-                let pk_u = ice_library.privatekey_to_publickey(&h);
-                let pk_c = ice_library.publickey_uncompres_to_compres(&pk_u);
+                // let pk_u = ice_library.privatekey_to_publickey(&h);
+                // let pk_c = ice_library.publickey_uncompres_to_compres(&pk_u);
+
+                // // Создаем секретный ключ из байт
+                let secret_key = SecretKey::from_slice(&h).expect("32 bytes, within curve order");
+                // Создаем публичный ключ из секретного
+                let public_key = PublicKey::from_secret_key(&secp, &secret_key);
+                // Получаем сжатый публичный ключ
+                let pk_c = public_key.serialize();
+                // Получаем несжатый публичный ключ
+                let pk_u = public_key.serialize_uncompressed();
+
 
                 //получем из них хеш160
                 let h160c = hash160(&pk_c[0..]).0;
