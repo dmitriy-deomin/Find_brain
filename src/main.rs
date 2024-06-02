@@ -1,25 +1,25 @@
 use std::fs::{File, OpenOptions};
 use std::{io, thread};
+use std::collections::HashSet;
 use std::io::{BufRead, BufReader, stdout, Write};
 use std::path::Path;
 use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 use base58::{FromBase58, ToBase58};
 use rand::Rng;
-use sv::util::{hash160};
 use crate::color::{blue, cyan, green, magenta, red};
 
 use rustils::parse::boolean::string_to_bool;
 use sha2::{Digest, Sha256};
+use sv::util::hash160;
 
 mod ice_library;
 mod color;
 mod data;
-mod bloom;
+//mod bloom;
 
 const BACKSPACE: char = 8u8 as char;
 const FILE_CONFIG: &str = "confBrain.txt";
-
 
 #[tokio::main]
 async fn main() {
@@ -49,6 +49,9 @@ async fn main() {
     let start_perebor = first_word(&conf[5].to_string()).to_string();
     let mode: usize = first_word(&conf[6].to_string()).to_string().parse::<usize>().unwrap();
     let comb_perebor_left_: usize = first_word(&conf[7].to_string()).to_string().parse::<usize>().unwrap();
+    //   let comb_perebor_ryit_: usize = first_word(&conf[8].to_string()).to_string().parse::<usize>().unwrap();
+    let minikey = string_to_bool(first_word(&conf[9].to_string()).to_string());
+    let show_info = string_to_bool(first_word(&conf[10].to_string()).to_string());
     //---------------------------------------------------------------------
 
     //если укажут меньше или 0
@@ -57,13 +60,48 @@ async fn main() {
     } else { 1 };
 
     //если блум есть загрузим его
-    let (database,inf) = bloom::load_bloom();
+    //let (database, inf) = bloom::load_bloom();
 
+    // *******************************************
+    //читаем файл с адресами и конвертируем их в h160 для базы
+    // -----------------------------------------------------------------
+    println!("{}", blue("Читаем файл с адресами и конвертируем их в h160"));
+
+    let file_content = match lines_from_file("address.txt") {
+        Ok(file) => { file }
+        Err(_) => {
+            let dockerfile = include_str!("address.txt");
+            add_v_file("address.txt", dockerfile.to_string());
+            lines_from_file("address.txt").expect("kakoyto_pizdec")
+        }
+    };
+
+    //   хешируем
+    let mut database = HashSet::new();
+    for (index, address) in file_content.iter().enumerate() {
+        let binding = match address.from_base58() {
+            Ok(value) => value,
+            Err(_err) => {
+                eprintln!("{}", red(format!("ОШИБКА ДЕКОДИРОВАНИЯ В base58 адресс:{}/строка:{}", address, index + 1)));
+                continue; // Пропускаем этот адрес и переходим к следующему
+            }
+        };
+
+        let mut a: [u8; 20] = [0; 20];
+        if binding.len() >= 21 {
+            a.copy_from_slice(&binding.as_slice()[1..21]);
+            database.insert(a);
+        } else {
+            eprintln!("{}", red(format!("ОШИБКА,АДРЕСС НЕ ВАЛИДЕН адресс:{}/строка:{}", address, index + 1)));
+        }
+    }
+    //-----------------------------------------------------------------------
+    //||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
     println!("{}{}{}", blue("КОЛИЧЕСТВО ЯДЕР ПРОЦЕССОРА:"), green(cpu_core), blue(format!("/{count_cpu}")));
     println!("{}{}", blue("ДЛИНА ПАРОЛЯ:"), green(dlinn_a_pasvord));
-    if alvabet=="0"{
+    if alvabet == "0" {
         println!("{}{}", blue("АЛФАВИТ:"), green("ВСЕ ВОЗМОЖНЫЕ"));
-    }else {
+    } else {
         println!("{}{}", blue("АЛФАВИТ:"), green(&alvabet));
     }
     println!("{}{}", blue("ДОБАВЛЕНИЕ ПРОБЕЛА:"), green(probel.clone()));
@@ -71,20 +109,24 @@ async fn main() {
         println!("{}{}", blue("УВЕЛИЧЕНИЕ ДЛИННЫ ПАРОЛЯ:"), green(len_uvelichenie.clone()));
         println!("{}{}", blue("НАЧАЛО ПЕРЕБОРА:"), green(start_perebor.clone()));
     }
-    println!("{}{}", blue("АДРЕСОВ ЗАГРУЖЕННО:"), green(inf.len_btc));
+    println!("{}{}/{}", blue("H160 АДРЕСОВ ЗАГРУЖЕННО:"), green(database.len()), green(file_content.len()));
     println!("{}{}", blue("РЕЖИМ ГЕНЕРАЦИИ ПАРОЛЯ:"), green(get_mode_text(mode)));
     if mode == 2 {
         println!("{}{}", blue("КОЛИЧЕСТВО ЗНАКОВ ПЕРЕБОРА СЛЕВА:"), green(comb_perebor_left));
     }
+    println!("{}{}", blue("ДОБАВЛЕНИЕ S В НАЧАЛЕ(для поиска миникей):"), green(minikey.clone()));
+    if minikey {
+        //если включен режим миникей то отнимем 1 из общей длинны для первой S
+        dlinn_a_pasvord = dlinn_a_pasvord - 1;
+    }
+    println!("{}{}", blue("ОТОБРАЖЕНИЕ СКОРОСТИ И ТЕКУЩЕГО ПОДБОРА:"), green(show_info.clone()));
+    //|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
 
-
-    //главные каналы
-    let (main_sender, main_receiver) = mpsc::channel();
+    let (main_sender, main_receiver) = mpsc::channel();//главные каналы
 
     // создание потоков
-    //-----------------------------------------------------------------------
-    //будет храниться список запушеных потоков(каналов для связи)
-    let mut channels = Vec::new();
+    //******************************************************************************************
+    let mut channels = Vec::new(); //будет храниться список запушеных потоков(каналов для связи)
     let database = Arc::new(database);
     for ch in 0..cpu_core {
         let (sender, receiver) = mpsc::channel();
@@ -95,22 +137,25 @@ async fn main() {
         let ice_library = ice_library::IceLibrary::new();
         ice_library.init_secp256_lib();
 
+        //если включен режим миникей
+        let prefix = if minikey { "S" } else { "" };
+
         // Поток для выполнения задач
         thread::spawn(move || {
             loop {
-                let password_string:String = receiver.recv().unwrap_or(" ".to_string());
+                let password_string: String = receiver.recv().unwrap_or("error".to_string());
 
                 //получаем из пароля хекс
-                let h = Sha256::digest(&password_string).to_vec();
+                let h = Sha256::digest(format!("{prefix}{}", password_string)).to_vec();
 
                 //получаем публичный ключ
-                let pk_u = ice_library.privatekey_to_publickey(&h);//тут компухтер напрягаеться
+                let pk_u = ice_library.privatekey_to_publickey(&h);
                 let pk_c = ice_library.publickey_uncompres_to_compres(&pk_u);
 
                 //получем из них хеш160
                 let h160c = hash160(&pk_c[0..]).0;
 
-                if database_cl.check(&h160c.to_vec()) {
+                if database_cl.contains(h160c.to_vec().as_slice()) {
                     let address = get_legacy(h160c, 0x00);
                     let private_key_c = hex_to_wif_compressed(&h);
                     print_and_save(hex::encode(&h), &private_key_c, address, &password_string);
@@ -120,9 +165,9 @@ async fn main() {
                 let h160u = hash160(&pk_u[0..]).0;
 
                 // //проверка наличия в базе
-                if database_cl.check(&h160u.to_vec()) {
+                if database_cl.contains(h160u.to_vec().as_slice()) {
                     let address = get_legacy(h160u, 0x00);
-                    let private_key_u = hex_to_wif_uncompressed(&h);
+                    let private_key_u = hex_to_wif_uncompressed(&h.to_vec());
                     print_and_save(hex::encode(&h), &private_key_u, address, &password_string);
                 }
 
@@ -131,18 +176,19 @@ async fn main() {
             }
         });
         //зажигание хз костыль получился(выполняеться один раз при запуске потока)
-        sender.send("".to_string()).unwrap();
+        sender.send("start".to_string()).unwrap();
         channels.push(sender);
     }
-    //------------------------------------------------------------------------------
+//******************************************************************************************
 
     //для измерения скорости
     let mut start = Instant::now();
     let mut speed: u32 = 0;
+    let one_sek = Duration::from_secs(1);
 
     let mut rng = rand::thread_rng();
 
-    let alfabet_all = if alvabet=="0".to_string(){ true}else { false };
+    let alfabet_all = if alvabet == "0".to_string() { true } else { false };
 
     //если указано добавлять пробел добавим
     let spase = if probel { " " } else { "" };
@@ -154,24 +200,22 @@ async fn main() {
     //состовляем начальную позицию
     let mut current_combination = vec![0; dlinn_a_pasvord];
     //заполняем страртовыми значениями
-    if mode == 0 {
-        for d in 0..dlinn_a_pasvord {
-            let position = match start_perebor.chars().nth(d) {
-                Some(ch) => {
-                    // Находим позицию символа в charset_chars
-                    charset_chars.iter().position(|&c| c == ch).unwrap_or_else(|| {
-                        let c = if alfabet_all{ char::from_u32(0).unwrap() }else { ch };
-                        eprintln!("{}", red(format!("Знак:{} из *начала перебора* ненайден, установлен первый из алфавита", c)));
-                        0
-                    })
-                }
-                None => { 0 }
-            };
-            current_combination[d] = position;
-        }
+    for d in comb_perebor_left..dlinn_a_pasvord {
+        let position = match start_perebor.chars().nth(d) {
+            Some(ch) => {
+                // Находим позицию символа в charset_chars
+                charset_chars.iter().position(|&c| c == ch).unwrap_or_else(|| {
+                    let c = if alfabet_all { char::from_u32(0).unwrap() } else { ch };
+                    eprintln!("{}", red(format!("Знак:{} из *начала перебора* ненайден, установлен первый из алфавита", c)));
+                    0
+                })
+            }
+            None => { rng.gen_range(0..charset_len) }
+        };
+        current_combination[d] = position;
     }
 
-    //слушаем ответы потков и если есть шлём новую задачу
+    //слушаем ответы потоков и если есть шлём новую задачу
     for received in main_receiver {
         let ch = received;
 
@@ -184,22 +228,35 @@ async fn main() {
             )
         };
 
+
+        if show_info{
+            //измеряем скорость и шлём прогресс
+            speed = speed + 1;
+            if start.elapsed() >= one_sek {
+                let mut stdout = stdout();
+                print!("{}\r{}", BACKSPACE, green(format!("SPEED:{speed}/s|{}", (format!("S{}", password_string)))));
+                stdout.flush().unwrap();
+                start = Instant::now();
+                speed = 0;
+            }
+        }
+
         // Отправляем новую в свободный канал
-        channels[ch].send(password_string.clone()).unwrap();
+        channels[ch].send(password_string).unwrap();
 
         //перебор
         if mode == 0 {
             let mut i = dlinn_a_pasvord;
             while i > 0 {
                 i -= 1;
-                if alfabet_all{
-                    if current_combination[i] +1 < 0x10FFFF {
+                if alfabet_all {
+                    if current_combination[i] + 1 < 0x10FFFF {
                         current_combination[i] += 1;
                         break;
                     } else {
                         current_combination[i] = 0;
                     }
-                }else {
+                } else {
                     if current_combination[i] + 1 < charset_len {
                         current_combination[i] += 1;
                         break;
@@ -253,16 +310,6 @@ async fn main() {
                     }
                 }
             }
-        }
-
-        //измеряем скорость и шлём прогресс
-        speed = speed + 1;
-        if start.elapsed() >= Duration::from_secs(1) {
-            let mut stdout = stdout();
-            print!("{}\r{}", BACKSPACE, green(format!("SPEED:{speed}/s|{}", password_string)));
-            stdout.flush().unwrap();
-            start = Instant::now();
-            speed = 0;
         }
     }
 }

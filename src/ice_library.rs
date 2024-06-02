@@ -1,42 +1,117 @@
-use std::ffi::{CString};
+use std::ffi::CString;
 use libloading::{Library, Symbol};
-use std::os::raw::{c_char};
+use std::os::raw::c_char;
+use once_cell::sync::Lazy;
 
 pub struct IceLibrary {
-    ice: Library,
+    init_secp256_lib: Symbol<'static, unsafe extern "C" fn()>,
+    privatekey_to_publickey: Symbol<'static, unsafe extern "C" fn(*const c_char, *mut u8)>,
 }
 
 impl IceLibrary {
+    // Создание новой библиотеки и загрузка .dll файла
     pub fn new() -> Self {
-        let ice = unsafe { Library::new("ice_secp256k1.dll") }.expect("Failed to load library");
-        IceLibrary { ice }
+        static LIB: Lazy<Library> = Lazy::new(|| {
+            unsafe { Library::new("ice_secp256k1.dll") }
+                .expect("Не удалось загрузить библиотеку ice_secp256k1.dll")
+        });
+
+        unsafe {
+            let init_secp256_lib: Symbol<unsafe extern "C" fn()> = LIB.get(b"init_secp256_lib")
+                .expect("Не удалось загрузить функцию init_secp256_lib");
+            let privatekey_to_publickey: Symbol<unsafe extern "C" fn(*const c_char, *mut u8)> =
+                LIB.get(b"scalar_multiplication")
+                    .expect("Не удалось загрузить функцию scalar_multiplication");
+
+            IceLibrary {
+                init_secp256_lib,
+                privatekey_to_publickey,
+            }
+        }
     }
 
+    // Инициализация библиотеки secp256
     pub(crate) fn init_secp256_lib(&self) {
-        let init_secp256_lib: Symbol<unsafe extern "C" fn() -> ()> = unsafe { self.ice.get(b"init_secp256_lib") }.expect("Failed init");
-        unsafe { init_secp256_lib() };
+        unsafe {
+            (self.init_secp256_lib)();
+        }
     }
 
-    pub fn privatekey_to_publickey(&self, hex: &Vec<u8>) -> [u8; 65] {
-        let privatekey_to_publickey: Symbol<unsafe extern "C" fn(*const c_char,  *mut u8) -> ()> =
-            unsafe { self.ice.get(b"scalar_multiplication") }.unwrap();
+    // Преобразование приватного ключа в публичный
+    pub fn privatekey_to_publickey(&self, hex: &[u8]) -> [u8; 65] {
+        // Преобразование массива байтов в строку hex
+        let hex_string = hex::encode(hex);
 
-        let private_key = CString::new(hex::encode(hex)).expect("Failed to create CString");
+        // Создание CString из строки hex
+        let private_key = CString::new(hex_string)
+            .expect("Не удалось создать CString из hex");
+
         let mut res = [0u8; 65];
 
-        unsafe { privatekey_to_publickey(private_key.as_ptr(), res.as_mut_ptr()) };
+        // Вызов функции из библиотеки
+        unsafe {
+            (self.privatekey_to_publickey)(private_key.as_ptr(), res.as_mut_ptr());
+        }
 
         res
     }
+
+    // Преобразование публичного ключа из несжатого в сжатый формат
     pub fn publickey_uncompres_to_compres(&self, pub_hex: &[u8; 65]) -> [u8; 33] {
         let mut result = [0u8; 33];
-
-        if pub_hex[64] % 2 == 0 {
-            result[0] = 2;
-        } else {
-            result[0] = 3;
-        }
-        result[1..33].copy_from_slice(&pub_hex[1..33]);
+        result[0] = if pub_hex[64] % 2 == 0 { 2 } else { 3 }; // Определение первого байта
+        result[1..].copy_from_slice(&pub_hex[1..33]); // Копирование оставшихся байт
         result
     }
 }
+
+
+// use std::ffi::CString;
+// use libloading::{Library, Symbol};
+// use std::os::raw::c_char;
+//
+// pub struct IceLibrary {
+//     ice: Library,
+// }
+//
+// impl IceLibrary {
+//     // Создание новой библиотеки и загрузка .dll файла
+//     pub fn new() -> Self {
+//         let ice = unsafe { Library::new("ice_secp256k1.dll") }
+//             .expect("Не удалось загрузить библиотеку ice_secp256k1.dll");
+//         IceLibrary { ice }
+//     }
+//
+//     // Инициализация библиотеки secp256
+//     pub(crate) fn init_secp256_lib(&self) {
+//         unsafe {
+//             let init_secp256_lib: Symbol<unsafe extern "C" fn()> = self.ice.get(b"init_secp256_lib")
+//                 .expect("Не удалось загрузить функцию init_secp256_lib");
+//             init_secp256_lib();
+//         }
+//     }
+//
+//     // Преобразование приватного ключа в публичный
+//     pub fn privatekey_to_publickey(&self, hex: &[u8]) -> [u8; 65] {
+//         let privatekey_to_publickey: Symbol<unsafe extern "C" fn(*const c_char, *mut u8)> =
+//             unsafe { self.ice.get(b"scalar_multiplication") }
+//                 .expect("Не удалось загрузить функцию scalar_multiplication");
+//
+//         // Создание CString из хекса
+//         let private_key = CString::new(hex::encode(hex)).expect("Не удалось создать CString из hex");
+//         let mut res = [0u8; 65];
+//
+//         // Вызов функции из библиотеки
+//         unsafe { privatekey_to_publickey(private_key.as_ptr(), res.as_mut_ptr()) };
+//
+//         res
+//     }
+//
+//     // Преобразование публичного ключа из несжатого в сжатый формат
+//     pub fn publickey_uncompres_to_compres(&self, pub_hex: &[u8; 65]) -> [u8; 33] {
+//         let mut result = [0u8; 33];
+//         result[0] = if pub_hex[64] % 2 == 0 { 2 } else { 3 }; // Определение первого байта
+//         result[1..].copy_from_slice(&pub_hex[1..33]); // Копирование оставшихся байт
+//         result
+//     }
+// }

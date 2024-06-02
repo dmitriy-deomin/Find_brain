@@ -80,7 +80,7 @@ pub(crate) fn load_bloom() -> (Bloom<Vec<u8>>, MetaDataBloom) {
         println!("{}{}", blue("TOTAL ADDRESS .txt:"), green(num_items_txt));
 
         //запихавание в блуум-------------------------------------------------------
-        let fp_rate = 0.00000000001;
+        let fp_rate = 0.000000000000000000001;
         let mut database = Bloom::new_for_fp_rate(num_items, fp_rate);
 
         println!("{}", blue("LOAD AND SAVE BLOOM BTC"));
