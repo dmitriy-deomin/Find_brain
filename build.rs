@@ -7,3 +7,8 @@ fn main() {
     res.set_icon("ico.ico"); // Укажите путь к вашему файлу иконки
     res.compile().unwrap();
 }
+
+#[cfg(not(windows))]
+fn main() {
+    // Ничего не делаем для других платформ
+}
