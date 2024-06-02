@@ -1,6 +1,7 @@
 use std::ffi::CString;
 use libloading::{Library, Symbol};
 use std::os::raw::c_char;
+use std::path::Path;
 use once_cell::sync::Lazy;
 
 pub struct IceLibrary {
@@ -8,12 +9,23 @@ pub struct IceLibrary {
     privatekey_to_publickey: Symbol<'static, unsafe extern "C" fn(*const c_char, *mut u8)>,
 }
 
+/// Statically known path to library.
+#[cfg(target_os = "linux")]
+pub fn lib_path() -> &'static Path {
+    Path::new("ice_secp256k1.so")
+}
+
+/// Statically known path to library.
+#[cfg(target_os = "windows")]
+pub fn lib_path() -> &'static Path {
+    Path::new("ice_secp256k1.dll")
+}
+
 impl IceLibrary {
     // Создание новой библиотеки и загрузка .dll файла
     pub fn new() -> Self {
         static LIB: Lazy<Library> = Lazy::new(|| {
-            unsafe {
-                if cfg!(target_os = "windows") {Library::new("ice_secp256k1.dll") } else { Library::new("ice_secp256k1.so") } }
+            unsafe { Library::new(lib_path()) }
                 .expect("Не удалось загрузить библиотеку ice_secp256k1")
         });
 
