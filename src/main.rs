@@ -12,15 +12,29 @@ use crate::color::{blue, cyan, green, magenta, red};
 use rustils::parse::boolean::string_to_bool;
 use sha2::{Digest, Sha256};
 use sv::util::hash160;
+use tiny_keccak::Hasher;
 
-mod ice_library;
+//mod ice_library;
 mod color;
 mod data;
 //mod bloom;
 
 
+pub const LEGACY_BTC: u8 = 0x00;
+pub const LEGACY_BTG: u8 = 0x26;
+pub const LEGACY_DASH: u8 = 0x4C;
+pub const BIP49_BTC: u8 = 0x05;
+pub const BIP49_BTG: u8 = 0x17;
+pub const BIP49_DASH: u8 = 0x10;
+pub const LEGACY_DOGE: u8 = 0x1E;
+pub const BIP49_DOGE: u8 = 0x16;
+pub const LEGACY_LTC: u8 = 0x30;
+
+
 extern crate secp256k1;
+
 use secp256k1::{PublicKey, Secp256k1, SecretKey};
+use tiny_keccak::Keccak;
 
 const BACKSPACE: char = 8u8 as char;
 const FILE_CONFIG: &str = "confBrain.txt";
@@ -79,9 +93,12 @@ async fn main() {
             lines_from_file("address.txt").expect("kakoyto_pizdec")
         }
     };
+    //-------------------------------------------------------------------------------
 
     //   хешируем
+    //----------------------------------------------------------------------------------------
     let mut database = HashSet::new();
+
     for (index, address) in file_content.iter().enumerate() {
         let binding = match address.from_base58() {
             Ok(value) => value,
@@ -100,6 +117,9 @@ async fn main() {
         }
     }
     //-----------------------------------------------------------------------
+
+
+    //ИНфо блок
     //||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
     println!("{}{}{}", blue("КОЛИЧЕСТВО ЯДЕР ПРОЦЕССОРА:"), green(cpu_core), blue(format!("/{count_cpu}")));
     println!("{}{}", blue("ДЛИНА ПАРОЛЯ:"), green(dlinn_a_pasvord));
@@ -119,34 +139,39 @@ async fn main() {
         println!("{}{}", blue("КОЛИЧЕСТВО ЗНАКОВ ПЕРЕБОРА СЛЕВА:"), green(comb_perebor_left));
     }
     println!("{}{}", blue("ДОБАВЛЕНИЕ S В НАЧАЛЕ(для поиска миникей):"), green(minikey.clone()));
-    if minikey {
+    let prefix = if minikey {
         //если включен режим миникей то отнимем 1 из общей длинны для первой S
         dlinn_a_pasvord = dlinn_a_pasvord - 1;
-    }
+        //укажем нужный префикс
+        "S"
+    } else { "" };
+
     println!("{}{}", blue("ОТОБРАЖЕНИЕ СКОРОСТИ И ТЕКУЩЕГО ПОДБОРА:"), green(show_info.clone()));
     //|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
 
-    let (main_sender, main_receiver) = mpsc::channel();//главные каналы
 
-    // создание потоков
-    //******************************************************************************************
-    let mut channels = Vec::new(); //будет храниться список запушеных потоков(каналов для связи)
+
+    //главные каналы
+    let (main_sender, main_receiver) = mpsc::channel();
+
+    // Запускаем выбраное количество потоков(ядер) постоянно работающих
+    //----------------------------------------------------------------------------------
+    //будет храниться список запушеных потоков(каналов для связи)
+    let mut channels = Vec::new();
     let database = Arc::new(database);
     for ch in 0..cpu_core {
+        //создаём для каждого потока отдельный канал для связи
         let (sender, receiver) = mpsc::channel();
         let database_cl = database.clone();
 
+        //главный поток
         let main_sender = main_sender.clone();
 
-        let ice_library = ice_library::IceLibrary::new();
-        ice_library.init_secp256_lib();
+        //let ice_library = ice_library::IceLibrary::new();
+        //ice_library.init_secp256_lib();
 
-        //если включен режим миникей
-        let prefix = if minikey { "S" } else { "" };
-        // Создание объекта secp256k1 с использованием эндоморфизма
         let secp = Secp256k1::new();
 
-        // Поток для выполнения задач
         thread::spawn(move || {
             loop {
                 let password_string: String = receiver.recv().unwrap_or("error".to_string());
@@ -158,13 +183,11 @@ async fn main() {
                 // let pk_u = ice_library.privatekey_to_publickey(&h);
                 // let pk_c = ice_library.publickey_uncompres_to_compres(&pk_u);
 
-                // // Создаем секретный ключ из байт
+                // Создаем секретный ключ из байт
                 let secret_key = SecretKey::from_slice(&h).expect("32 bytes, within curve order");
                 // Создаем публичный ключ из секретного
                 let public_key = PublicKey::from_secret_key(&secp, &secret_key);
-                // Получаем сжатый публичный ключ
                 let pk_c = public_key.serialize();
-                // Получаем несжатый публичный ключ
                 let pk_u = public_key.serialize_uncompressed();
 
 
@@ -187,7 +210,7 @@ async fn main() {
                     print_and_save(hex::encode(&h), &private_key_u, address, &password_string);
                 }
 
-                //шлём поток
+                //шлём в главный поток для получения следующей задачи
                 main_sender.send(ch).unwrap();
             }
         });
@@ -195,8 +218,11 @@ async fn main() {
         sender.send("start".to_string()).unwrap();
         channels.push(sender);
     }
-//******************************************************************************************
+    //---------------------------------------------------------------------------------------------
 
+
+    //подготовка к запуску главного цикла
+    //-----------------------------------------------------------------------------------------
     //для измерения скорости
     let mut start = Instant::now();
     let mut speed: u32 = 0;
@@ -230,8 +256,13 @@ async fn main() {
         };
         current_combination[d] = position;
     }
+    //-----------------------------------------------------------------------------------
 
-    //слушаем ответы потоков и если есть шлём новую задачу
+
+
+    //--ГЛАВНЫЙ ЦИКЛ
+    // слушаем ответы потоков и если есть шлём новую задачу
+    //----------------------------------------------------------------------------------------------
     for received in main_receiver {
         let ch = received;
 
@@ -245,12 +276,12 @@ async fn main() {
         };
 
 
-        if show_info{
+        if show_info {
             //измеряем скорость и шлём прогресс
             speed = speed + 1;
             if start.elapsed() >= one_sek {
                 let mut stdout = stdout();
-                print!("{}\r{}", BACKSPACE, green(format!("SPEED:{speed}/s|{}", (format!("S{}", password_string)))));
+                print!("{}\r{}", BACKSPACE, green(format!("SPEED:{speed}/s|{}", (format!("{}{}",prefix, password_string)))));
                 stdout.flush().unwrap();
                 start = Instant::now();
                 speed = 0;
@@ -328,6 +359,7 @@ async fn main() {
             }
         }
     }
+    //------------------------------------------------------------------------------------
 }
 
 fn get_mode_text(mode: usize) -> String {
@@ -401,6 +433,56 @@ pub fn get_legacy(hash160: [u8; 20], coin: u8) -> String {
     let mut v = Vec::with_capacity(23);
     v.push(coin);
     v.extend_from_slice(&hash160);
+    let checksum = sha256d(&v);
+    v.extend_from_slice(&checksum[0..4]);
+    let b: &[u8] = v.as_ref();
+    b.to_base58()
+}
+
+//ETH
+pub fn get_eth_address_from_public_key(public_key_u: &String) -> String {
+    let mut output = [0u8; 32];
+    let mut hasher = Keccak::v256();
+    let k = hex::decode(&public_key_u.strip_prefix("04").unwrap_or(&public_key_u)).unwrap();
+    hasher.update(&k);
+    hasher.finalize(&mut output);
+    hex::encode(&output[12..])
+}
+
+//bip49------------------------------------------------------
+// pub fn dla_bip_49(public_key: &[u8]) -> Vec<u8> {
+//     let digest1 = Sha256::digest(&public_key);
+//
+//     let hash160_1 = ripemd::Ripemd160::digest(&digest1);
+//
+//     let mut v = Vec::with_capacity(20);
+//     v.push(0x00);
+//     v.push(0x14);
+//     v.extend_from_slice(&hash160_1);
+//
+//     let digest2 = Sha256::digest(&v);
+//     let hash160_3 = ripemd::Ripemd160::digest(&digest2);
+//     let hash_slice = hash160_3;
+//     hash_slice.to_vec()
+// }
+//
+// pub fn get_bip49(hash160_3: &[u8], coin: u8) -> String {
+//
+//     let mut v = Vec::with_capacity(25);
+//     v.push(coin);
+//     v.extend_from_slice(&hash160_3);
+//
+//     let checksum = sha256d(&v);
+//     v.extend_from_slice(&checksum[0..4]);
+//     v.to_base58()
+// }
+//------------------------------------------------------------------------
+
+// TRX
+pub fn get_trx_from_eth(eth: String) -> String {
+    let mut v = Vec::with_capacity(50);
+    v.push(0x41);
+    v.extend_from_slice(hex::decode(eth).unwrap().as_slice());
     let checksum = sha256d(&v);
     v.extend_from_slice(&checksum[0..4]);
     let b: &[u8] = v.as_ref();
