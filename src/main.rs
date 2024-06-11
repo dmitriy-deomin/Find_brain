@@ -649,9 +649,9 @@ pub fn get_len_find_create(coin: &str) -> usize {
         Err(_) => {
             print!("{}{}", blue("ФАЙЛ НЕ НАЙДЕН,ИСПОЛЬЗУЕМ ВСТРОЕНЫЙ:"), green(format!("{coin}:")));
             let dockerfile = match coin {
-                "btc.txt" => { include_str!("coin_txt_list/btc.txt") }
-                "eth.txt" => { include_str!("coin_txt_list/eth.txt") }
-                _ => { include_str!("coin_txt_list/btc.txt") }
+                "btc.txt" => { include_str!("btc.txt") }
+                "eth.txt" => { include_str!("eth.txt") }
+                _ => { include_str!("btc.txt") }
             };
             add_v_file(coin, dockerfile.to_string());
             let lines = get_lines(coin);
