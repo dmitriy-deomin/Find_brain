@@ -80,6 +80,11 @@ async fn main() {
         comb_perebor_left_
     } else { 1 };
 
+    //если какойто бызы небудет небум искать в ней
+    let find_eth;
+    let find_btc;
+
+
     //провереряем если файл с хешами битка
     //--------------------------------------------------------------------------------------------
     if fs::metadata(Path::new("btc_h160.bin")).is_ok() {
@@ -120,7 +125,7 @@ async fn main() {
     }
     //-----------------------------------------------------------------------------------------------
 
-    //провереряем если файл с хешами эфира
+    //провереряем если файл с хешами ETH
     //--------------------------------------------------------------------------------------------
     if fs::metadata(Path::new("eth.bin")).is_ok() {
         println!("{}", green("файл eth.bin уже существует,конвертирование пропущено"));
@@ -190,7 +195,10 @@ async fn main() {
             _ => {}
         }
     }
+    //включим или выключим проверку ETH
+    find_btc = if colichestvo_btc>0{ true }else { false };
     println!("{}{}", blue("Данные BTC успешно загружены в базу:"), green(format!("{colichestvo_btc} шт")));
+    println!("{}{}", blue("ГЕНЕРАЦИЯ BTC АДДРЕССОВ:"), green(format!("{}",find_btc)));
 
     //запись ETH в базу
     let mut colichestvo_eth = 0;
@@ -208,7 +216,12 @@ async fn main() {
             _ => {}
         }
     }
+    //включим или выключим проверку ETH
+    find_eth = if colichestvo_eth>0{ true }else { false };
+
     println!("{}{}", blue("Данные ETH успешно загружены в базу:"), green(format!("{colichestvo_eth} шт")));
+    println!("{}{}", blue("ГЕНЕРАЦИЯ ETH АДДРЕССОВ:"), green(format!("{}",find_eth)));
+
 
     println!("{}{}", blue("ИТОГО ЗАГРУЖЕННО В БАЗУ:"), green(format!("{} шт", colichestvo_btc + colichestvo_eth)));
 
@@ -242,6 +255,13 @@ async fn main() {
     println!("{}{}", blue("ОТОБРАЖЕНИЕ СКОРОСТИ И ТЕКУЩЕГО ПОДБОРА:"), green(show_info.clone()));
     //|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
 
+
+    //проверка есть ли в базе вообще чего
+    if find_btc == false && find_eth == false{
+        println!("{}", red("БАЗА ПУСТА\nпоместите рядом с программой текстовые файлы со списком адресов:\nbtc.txt eth.txt"));
+        jdem_user_to_close_programm();
+        return;
+    }
 
     //главные каналы
     let (main_sender, main_receiver) = mpsc::channel();
@@ -297,29 +317,34 @@ async fn main() {
                     (public_key.serialize_uncompressed(),public_key.serialize())
                 };
 
-                //получем из них хеш160
-                let h160c = hash160(&pk_c[0..]).0;
+                //проверка наличия в базе ETH
+                if find_btc{
+                    //получем из них хеш160
+                    let h160c = hash160(&pk_c[0..]).0;
 
-                //проверка наличия в базе BTC compress
-                if database_cl.contains(&h160c) {
-                    let address = get_legacy(h160c, 0x00);
-                    let private_key_c = hex_to_wif_compressed(&h.to_vec());
-                    print_and_save(hex::encode(&h), &private_key_c, address, &password_string);
-                }
+                    //проверка наличия в базе BTC compress
+                    if database_cl.contains(&h160c) {
+                        let address = get_legacy(h160c, 0x00);
+                        let private_key_c = hex_to_wif_compressed(&h.to_vec());
+                        print_and_save(hex::encode(&h), &private_key_c, address, &password_string);
+                    }
 
-                //получем из них хеш160
-                let h160u = hash160(&pk_u[0..]).0;
+                    //получем из них хеш160
+                    let h160u = hash160(&pk_u[0..]).0;
 
-                //проверка наличия в базе BTC uncompres
-                if database_cl.contains(&h160u) {
-                    let address = get_legacy(h160u, 0x00);
-                    let private_key_u = hex_to_wif_uncompressed(&h.to_vec());
-                    print_and_save(hex::encode(&h), &private_key_u, address, &password_string);
+                    //проверка наличия в базе BTC uncompres
+                    if database_cl.contains(&h160u) {
+                        let address = get_legacy(h160u, 0x00);
+                        let private_key_u = hex_to_wif_uncompressed(&h.to_vec());
+                        print_and_save(hex::encode(&h), &private_key_u, address, &password_string);
+                    }
                 }
 
                 //проверка наличия в базе ETH
-                if database_cl.contains(&get_eth_kessak_from_public_key(pk_u)) {
-                    print_and_save_eth(hex::encode(&h), format!("0x{}", hex::encode(get_eth_kessak_from_public_key(pk_u))), &password_string);
+                if find_eth{
+                    if database_cl.contains(&get_eth_kessak_from_public_key(pk_u)) {
+                        print_and_save_eth(hex::encode(&h), format!("0x{}", hex::encode(get_eth_kessak_from_public_key(pk_u))), &password_string);
+                    }
                 }
 
                 //шлём в главный поток для получения следующей задачи
@@ -674,4 +699,11 @@ pub(crate) fn get_lines(file: &str) -> usize {
         line_count += 1;
     }
     line_count
+}
+
+fn jdem_user_to_close_programm(){
+    // Ожидание ввода пользователя для завершения программы
+    println!("{}", blue("Нажмите Enter, чтобы завершить программу..."));
+    let mut input = String::new();
+    io::stdin().read_line(&mut input).expect("Ошибка чтения строки");
 }
