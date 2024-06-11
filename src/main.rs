@@ -1,27 +1,32 @@
 use std::fs::{File, OpenOptions};
 use std::{fs, io, thread};
 use std::collections::HashSet;
-use std::fmt::format;
-use std::io::{BufRead, BufReader, Read, stdout, Write};
+use std::io::{BufRead, BufReader, BufWriter, Read, stdout, Write};
 use std::path::Path;
 use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 use base58::{FromBase58, ToBase58};
-//use bloomfilter::Bloom;
 use rand::Rng;
-use crate::color::{blue, cyan, green, magenta, red};
 
+use crate::color::{blue, cyan, green, magenta, red};
 use rustils::parse::boolean::string_to_bool;
 use sha2::{Digest, Sha256};
 use sv::util::hash160;
-use tiny_keccak::Hasher;
-use crate::bloom::{get_len_find_create,get_lines,get_bufer_file};
+use tiny_keccak::{Hasher, Keccak};
 
-//mod ice_library;
+//use tiny_keccak::Keccak;
+
+#[cfg(not(windows))]
+use rust_secp256k1::{PublicKey, Secp256k1, SecretKey};
+
+#[cfg(windows)]
+mod ice_library;
+
+#[cfg(windows)]
+use ice_library::IceLibrary;
+
 mod color;
 mod data;
-mod bloom;
-
 
 pub const LEGACY_BTC: u8 = 0x00;
 pub const LEGACY_BTG: u8 = 0x26;
@@ -33,15 +38,8 @@ pub const LEGACY_DOGE: u8 = 0x1E;
 pub const BIP49_DOGE: u8 = 0x16;
 pub const LEGACY_LTC: u8 = 0x30;
 
-
-extern crate secp256k1;
-
-use secp256k1::{PublicKey, Secp256k1, SecretKey};
-//use tiny_keccak::Keccak;
-
 const BACKSPACE: char = 8u8 as char;
 const FILE_CONFIG: &str = "confBrain.txt";
-
 
 
 #[tokio::main]
@@ -73,9 +71,8 @@ async fn main() {
     let start_perebor = first_word(&conf[5].to_string()).to_string();
     let mode: usize = first_word(&conf[6].to_string()).to_string().parse::<usize>().unwrap();
     let comb_perebor_left_: usize = first_word(&conf[7].to_string()).to_string().parse::<usize>().unwrap();
-    //   let comb_perebor_ryit_: usize = first_word(&conf[8].to_string()).to_string().parse::<usize>().unwrap();
-    let minikey = string_to_bool(first_word(&conf[9].to_string()).to_string());
-    let show_info = string_to_bool(first_word(&conf[10].to_string()).to_string());
+    let minikey = string_to_bool(first_word(&conf[8].to_string()).to_string());
+    let show_info = string_to_bool(first_word(&conf[9].to_string()).to_string());
     //---------------------------------------------------------------------
 
     //если укажут меньше или 0
@@ -83,26 +80,25 @@ async fn main() {
         comb_perebor_left_
     } else { 1 };
 
-
-
-    //проверяем есть ли файл(создаём) и считаем сколько строк
-    let len_btc_txt = get_len_find_create("btc.txt");
-    //провереряем если файл с обрубками уже есть то скажем что пропускаем и дальше идём
+    //провереряем если файл с хешами битка
+    //--------------------------------------------------------------------------------------------
     if fs::metadata(Path::new("btc_h160.bin")).is_ok() {
-        println!("{}", red("файл btc_h160.bin уже существует,конвертирование пропущено"));
+        println!("{}", green("файл btc_h160.bin уже существует,конвертирование пропущено"));
     } else {
+        //проверяем есть ли файл(создаём) и считаем сколько строк
+        let len_btc_txt = get_len_find_create("btc.txt");
+
         println!("{}", blue("конвертирование адресов в h160 и сохранение в btc_h160.bin"));
         //конвертируем в h160 и записываем в файл рядом
         //создаём файл
         let mut file = File::create("btc_h160.bin").unwrap();
         //ищем в списке нужные делаем им харакири и ложим обрубки в файл
-        let mut len_btc  = 0;
+        let mut len_btc = 0;
         for (index, address) in get_bufer_file("btc.txt").lines().enumerate() {
-
             let binding = match address.expect("REASON").from_base58() {
                 Ok(value) => value,
                 Err(_err) => {
-                    eprintln!("{}", red(format!("ОШИБКА ДЕКОДИРОВАНИЯ В base58 строка:{}",index + 1)));
+                    eprintln!("{}", red(format!("ОШИБКА ДЕКОДИРОВАНИЯ В base58 строка:{}", index + 1)));
                     continue; // Пропускаем этот адрес и переходим к следующему
                 }
             };
@@ -113,90 +109,108 @@ async fn main() {
                 a.copy_from_slice(&binding.as_slice()[1..21]);
                 if let Err(e) = file.write_all(&a) {
                     eprintln!("Не удалось записать в файл: {}", e);
-                }else {
-                    len_btc = len_btc+1;
+                } else {
+                    len_btc = len_btc + 1;
                 }
-
             } else {
                 eprintln!("{}", red(format!("ОШИБКА,АДРЕСС НЕ ВАЛИДЕН строка:{}", index + 1)));
             }
-
         }
         println!("{}", blue(format!("конвертировано адресов в h160:{}/{}", green(len_btc_txt), green(len_btc))));
     }
+    //-----------------------------------------------------------------------------------------------
 
-    println!("{}", blue("ЗАПИСЬ ДАННЫХ В БАЗУ.."));
+    //провереряем если файл с хешами эфира
+    //--------------------------------------------------------------------------------------------
+    if fs::metadata(Path::new("eth.bin")).is_ok() {
+        println!("{}", green("файл eth.bin уже существует,конвертирование пропущено"));
+    } else {
+        //проверяем есть ли файл(создаём) и считаем сколько строк
+        let len_eth_txt = get_len_find_create("eth.txt");
+
+        println!("{}", blue("конвертирование адресов и сохранение в eth.bin"));
+
+        let file = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open("eth.bin")
+            .unwrap();
+        let mut writer = BufWriter::new(file);
+
+        let mut len_eth = 0;
+        let mut invalid_addresses = Vec::new();
+
+        for (index, line) in get_bufer_file("eth.txt").lines().enumerate() {
+            match line {
+                Ok(address) => match eth_address_to_bytes(&address) {
+                    Ok(bytes) => {
+                        if let Err(e) = writer.write_all(&bytes) {
+                            eprintln!("Не удалось записать в файл: {}", e);
+                        } else {
+                            len_eth += 1;
+                        }
+                    }
+                    Err(e) => {
+                        invalid_addresses.push((index, address, e));
+                    }
+                },
+                Err(e) => {
+                    invalid_addresses.push((index, "".to_string(), e.to_string()));
+                }
+            }
+        }
+
+        println!("{}", blue(format!("конвертировано адресов:{}/{}", green(len_eth_txt), green(len_eth))));
+
+        if !invalid_addresses.is_empty() {
+            println!("Invalid addresses:");
+            for (index, address, error) in invalid_addresses {
+                println!("Line {}: {} ({})", index + 1, address, error);
+            }
+        }
+    }
+    //-----------------------------------------------------------------------------------------------
+
+
+    // запись BTC в базу
+    let mut colichestvo_btc = 0;
+    println!("{}", blue("ЗАПИСЬ BTC ДАННЫХ В БАЗУ.."));
     let mut database: HashSet<[u8; 20]> = HashSet::new();
     let file = File::open("btc_h160.bin").expect("неудалось открыть файл");
     let mut reader = BufReader::new(file);
-    let mut colichestvo = 0;
     loop {
         let mut array = [0u8; 20];
         match reader.read_exact(&mut array) {
             Ok(_) => {
-                colichestvo = colichestvo+1;
+                colichestvo_btc = colichestvo_btc + 1;
                 database.insert(array);
             }
             Err(ref e) if e.kind() == io::ErrorKind::UnexpectedEof => break,
             _ => {}
         }
     }
+    println!("{}{}", blue("Данные BTC успешно загружены в базу:"), green(format!("{colichestvo_btc} шт")));
 
-    println!("{}{} шт", blue("Данные успешно загружены в базу:"),green(format!("{colichestvo}")));
+    //запись ETH в базу
+    let mut colichestvo_eth = 0;
+    println!("{}", blue("ЗАПИСЬ ETH ДАННЫХ В БАЗУ.."));
+    let file = File::open("eth.bin").expect("неудалось открыть файл");
+    let mut reader = BufReader::new(file);
+    loop {
+        let mut array = [0u8; 20];
+        match reader.read_exact(&mut array) {
+            Ok(_) => {
+                colichestvo_eth = colichestvo_eth + 1;
+                database.insert(array);
+            }
+            Err(ref e) if e.kind() == io::ErrorKind::UnexpectedEof => break,
+            _ => {}
+        }
+    }
+    println!("{}{}", blue("Данные ETH успешно загружены в базу:"), green(format!("{colichestvo_eth} шт")));
 
-    // let mut database = HashSet::new();
-    // println!("{}", blue("ЗАПИСЬ ДАННЫХ В БАЗУ.."));
-    // for line in get_bufer_file("btc_h160.txt").lines() {
-    //     match line {
-    //         Ok(l) => {
-    //             // Добавление строки в Bloom фильтр
-    //             database.insert(l.as_bytes()[0..20]);
-    //         }
-    //         Err(e) => { println!("ошибка записи в базу{}", e) }
-    //     }
-    // }
-
-
-    //если блум есть загрузим его
-    //let database= bloom::load_bloom();
-
-    // // *******************************************
-    // //читаем файл с адресами и конвертируем их в h160 для базы
-    // // -----------------------------------------------------------------
-    // println!("{}", blue("Читаем файл с адресами и конвертируем их в h160"));
-    //
-    // let file_content = match lines_from_file("address.txt") {
-    //     Ok(file) => { file }
-    //     Err(_) => {
-    //         let dockerfile = include_str!("address.txt");
-    //         add_v_file("address.txt", dockerfile.to_string());
-    //         lines_from_file("address.txt").expect("kakoyto_pizdec")
-    //     }
-    // };
-    // //-------------------------------------------------------------------------------
-    //
-    // //   хешируем
-    // //----------------------------------------------------------------------------------------
-    // let mut database = HashSet::new();
-    // for (index, address) in file_content.iter().enumerate() {
-    //     let binding = match address.from_base58() {
-    //         Ok(value) => value,
-    //         Err(_err) => {
-    //             eprintln!("{}", red(format!("ОШИБКА ДЕКОДИРОВАНИЯ В base58 адресс:{}/строка:{}", address, index + 1)));
-    //             continue; // Пропускаем этот адрес и переходим к следующему
-    //         }
-    //     };
-    //
-    //     let mut a: [u8; 20] = [0; 20];
-    //     if binding.len() >= 21 {
-    //         a.copy_from_slice(&binding.as_slice()[1..21]);
-    //         database.insert(a);
-    //     } else {
-    //         eprintln!("{}", red(format!("ОШИБКА,АДРЕСС НЕ ВАЛИДЕН адресс:{}/строка:{}", address, index + 1)));
-    //     }
-    // }
-    // //-----------------------------------------------------------------------
-
+    println!("{}{}", blue("ИТОГО ЗАГРУЖЕННО В БАЗУ:"), green(format!("{} шт", colichestvo_btc + colichestvo_eth)));
 
     //ИНфо блок
     //||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
@@ -212,7 +226,7 @@ async fn main() {
         println!("{}{}", blue("УВЕЛИЧЕНИЕ ДЛИННЫ ПАРОЛЯ:"), green(len_uvelichenie.clone()));
         println!("{}{}", blue("НАЧАЛО ПЕРЕБОРА:"), green(start_perebor.clone()));
     }
-   // println!("{}{}/{}", blue("H160 АДРЕСОВ ЗАГРУЖЕННО:"), green(database.len()), green(file_content.len()));
+    // println!("{}{}/{}", blue("H160 АДРЕСОВ ЗАГРУЖЕННО:"), green(database.len()), green(file_content.len()));
     println!("{}{}", blue("РЕЖИМ ГЕНЕРАЦИИ ПАРОЛЯ:"), green(get_mode_text(mode)));
     if mode == 2 {
         println!("{}{}", blue("КОЛИЧЕСТВО ЗНАКОВ ПЕРЕБОРА СЛЕВА:"), green(comb_perebor_left));
@@ -227,7 +241,6 @@ async fn main() {
 
     println!("{}{}", blue("ОТОБРАЖЕНИЕ СКОРОСТИ И ТЕКУЩЕГО ПОДБОРА:"), green(show_info.clone()));
     //|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
-
 
 
     //главные каналы
@@ -249,55 +262,65 @@ async fn main() {
         //главный поток
         let main_sender = main_sender.clone();
 
-        // let ice_library = ice_library::IceLibrary::new();
-        // ice_library.init_secp256_lib();
-        let secp = Secp256k1::new();
+        #[cfg(windows)]
+            let ice_library = {
+            let lib = IceLibrary::new();
+            lib.init_secp256_lib();
+            lib
+        };
 
+        //для всего остального
+        #[cfg(not(windows))]
+            let secp = Secp256k1::new();
 
-        thread::spawn( move || {
+        thread::spawn(move || {
             loop {
                 let password_string: String = receiver.recv().unwrap_or("error".to_string());
 
-                //получаем из пароля хекс
-                let h = Sha256::digest(format!("{prefix}{}", password_string)).to_vec();
+                // Получаем хеш SHA-256 из пароля
+                let mut sha256 = Sha256::new();
+                sha256.update(format!("{prefix}{}", password_string));
+                let h = sha256.finalize().0;
 
-                //получаем публичный ключ
-                //  let pk_u = ice_library.privatekey_to_publickey(&h);
-                //  let pk_c = ice_library.publickey_uncompres_to_compres(&pk_u);
+                // Получаем публичный ключ
+                #[cfg(windows)]
+                    let (pk_u,pk_c)={
+                    let p = ice_library.privatekey_to_publickey(&h);
+                    (p,ice_library.publickey_uncompres_to_compres(&p))
+                };
 
-                // Создаем секретный ключ из байт
-                let secret_key = SecretKey::from_slice(&h).expect("32 bytes, within curve order");
-                // Создаем публичный ключ из секретного
-                let public_key = PublicKey::from_secret_key(&secp, &secret_key);
-                let pk_c = public_key.serialize();
-                let pk_u = public_key.serialize_uncompressed();
+                #[cfg(not(windows))]
+                    let (pk_u,pk_c)= {
+                    // Создаем секретный ключ из байт
+                    let secret_key = SecretKey::from_slice(&h).expect("32 bytes, within curve order");
+                    let public_key = PublicKey::from_secret_key(&secp, &secret_key);
+                    (public_key.serialize_uncompressed(),public_key.serialize())
+                };
 
                 //получем из них хеш160
                 let h160c = hash160(&pk_c[0..]).0;
 
+                //проверка наличия в базе BTC compress
                 if database_cl.contains(&h160c) {
                     let address = get_legacy(h160c, 0x00);
-                    let private_key_c = hex_to_wif_compressed(&h);
+                    let private_key_c = hex_to_wif_compressed(&h.to_vec());
                     print_and_save(hex::encode(&h), &private_key_c, address, &password_string);
                 }
 
                 //получем из них хеш160
                 let h160u = hash160(&pk_u[0..]).0;
 
-                // //проверка наличия в базе
-                if database_cl.contains(&h160u){
+                //проверка наличия в базе BTC uncompres
+                if database_cl.contains(&h160u) {
                     let address = get_legacy(h160u, 0x00);
                     let private_key_u = hex_to_wif_uncompressed(&h.to_vec());
                     print_and_save(hex::encode(&h), &private_key_u, address, &password_string);
                 }
 
-
-                // // //проверка наличия в базе ETH
-                // if database_cl.check(&get_eth_kessak_from_public_key(pk_u)){
-                //     let address =  get_eth_address_from_public_key(pk_u);
-                //     let private_key_u = hex_to_wif_uncompressed(&h.to_vec());
-                //     print_and_save(hex::encode(&h), &private_key_u, address, &password_string);
-                // }
+                //проверка наличия в базе ETH
+                if database_cl.contains(&get_eth_kessak_from_public_key(pk_u)) {
+                    print_and_save_eth(hex::encode(&h), format!("0x{}", hex::encode(get_eth_kessak_from_public_key(pk_u))), &password_string);
+                }
 
                 //шлём в главный поток для получения следующей задачи
                 main_sender.send(ch).unwrap();
@@ -348,7 +371,6 @@ async fn main() {
     //-----------------------------------------------------------------------------------
 
 
-
     //--ГЛАВНЫЙ ЦИКЛ
     // слушаем ответы потоков и если есть шлём новую задачу
     //----------------------------------------------------------------------------------------------
@@ -370,7 +392,7 @@ async fn main() {
             speed = speed + 1;
             if start.elapsed() >= one_sek {
                 let mut stdout = stdout();
-                print!("{}\r{}", BACKSPACE, green(format!("SPEED:{speed}/s|{}", (format!("{}{}",prefix, password_string)))));
+                print!("{}\r{}", BACKSPACE, green(format!("SPEED:{speed}/s|{}", (format!("{}{}", prefix, password_string)))));
                 stdout.flush().unwrap();
                 start = Instant::now();
                 speed = 0;
@@ -500,6 +522,7 @@ fn hex_to_wif_uncompressed(raw_hex: &Vec<u8>) -> String {
     } else { format!("Ошибка hex меньше 64 :'{}'", hex::encode(raw_hex).to_string()) }
 }
 
+
 fn print_and_save(hex: String, key: &String, addres: String, password_string: &String) {
     println!("{}", cyan("\n!!!!!!!!!!!!!!!!!!!!!!FOUND!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"));
     println!("{}{}", cyan("ПАРОЛЬ:"), cyan(password_string));
@@ -507,6 +530,17 @@ fn print_and_save(hex: String, key: &String, addres: String, password_string: &S
     println!("{}{}", cyan("PRIVATE KEY:"), cyan(key));
     println!("{}{}", cyan("ADDRESS:"), cyan(addres.clone()));
     let s = format!("ПАРОЛЬ:{}\nHEX:{}\nPRIVATE KEY: {}\nADDRESS {}\n", password_string, hex, key, addres);
+    add_v_file("FOUND.txt", s);
+    println!("{}", cyan("SAVE TO FOUND.txt"));
+    println!("{}", cyan("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"));
+}
+
+fn print_and_save_eth(hex: String, addres: String, password_string: &String) {
+    println!("{}", cyan("\n!!!!!!!!!!!!!!!!!!!!!!FOUND!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"));
+    println!("{}{}", cyan("ПАРОЛЬ:"), cyan(password_string));
+    println!("{}{}", cyan("HEX:"), cyan(hex.clone()));
+    println!("{}{}", cyan("ADDRESS:"), cyan(addres.clone()));
+    let s = format!("ПАРОЛЬ:{}\nHEX:{}\nADDRESS {}\n", password_string, hex, addres);
     add_v_file("FOUND.txt", s);
     println!("{}", cyan("SAVE TO FOUND.txt"));
     println!("{}", cyan("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"));
@@ -529,21 +563,37 @@ pub fn get_legacy(hash160: [u8; 20], coin: u8) -> String {
 }
 
 //ETH
-// pub fn get_eth_address_from_public_key(public_key_u: [u8; 65]) -> String {
-//     let mut output = [0u8; 32];
-//     let mut hasher = Keccak::v256();
-//     hasher.update(public_key_u.split_first().unwrap().1);
-//     hasher.finalize(&mut output);
-//     hex::encode(&output[12..])
-// }
-// pub fn get_eth_kessak_from_public_key(public_key_u: [u8; 65]) -> Vec<u8> {
-//     let mut output = [0u8; 32];
-//     let mut hasher = Keccak::v256();
-//     hasher.update(public_key_u.split_first().unwrap().1);
-//     hasher.finalize(&mut output);
-//     output[12..].to_vec()
-// }
+pub fn get_eth_kessak_from_public_key(public_key_u: [u8; 65]) -> [u8; 20] {
+    let mut output = [0u8; 32];
+    let mut hasher = Keccak::v256();
+    hasher.update(public_key_u.split_first().unwrap().1);
+    hasher.finalize(&mut output);
 
+    let mut result = [0u8; 20];
+    result.copy_from_slice(&output[12..32]);
+    result
+}
+
+fn eth_address_to_bytes(address: &str) -> Result<[u8; 20], String> {
+    let hex_str = if address.starts_with("0x") {
+        &address[2..]
+    } else {
+        address
+    };
+
+    match hex::decode(hex_str) {
+        Ok(decoded) => {
+            if decoded.len() == 20 {
+                let mut bytes = [0u8; 20];
+                bytes.copy_from_slice(&decoded);
+                Ok(bytes)
+            } else {
+                Err(format!("Invalid length for address: {}", address))
+            }
+        }
+        Err(_) => Err(format!("Decoding failed for address: {}", address)),
+    }
+}
 //bip49------------------------------------------------------
 // pub fn dla_bip_49(public_key: &[u8]) -> Vec<u8> {
 //     let digest1 = Sha256::digest(&public_key);
@@ -588,7 +638,40 @@ fn first_word(s: &String) -> &str {
     s.trim().split_whitespace().next().unwrap_or("")
 }
 
-fn get_buffer_file(filename: &str) -> io::Lines<io::BufReader<File>> {
-    let file = File::open(Path::new(filename)).expect("не удалось открыть файл");
-    io::BufReader::new(file).lines()
+//если txt есть считем его строки, иначе создадим и посчитаем
+pub fn get_len_find_create(coin: &str) -> usize {
+    match fs::metadata(Path::new(coin)) {
+        Ok(_) => {
+            let lines = get_lines(coin);
+            println!("{}{}", blue("НАЙДЕН ФАЙЛ:"), green(format!("{coin}:{lines} строк")));
+            lines
+        }
+        Err(_) => {
+            print!("{}{}", blue("ФАЙЛ НЕ НАЙДЕН,ИСПОЛЬЗУЕМ ВСТРОЕНЫЙ:"), green(format!("{coin}:")));
+            let dockerfile = match coin {
+                "btc.txt" => { include_str!("coin_txt_list/btc.txt") }
+                "eth.txt" => { include_str!("coin_txt_list/eth.txt") }
+                _ => { include_str!("coin_txt_list/btc.txt") }
+            };
+            add_v_file(coin, dockerfile.to_string());
+            let lines = get_lines(coin);
+            println!("{}", green(format!("{} строк", lines)));
+            lines
+        }
+    }
+}
+
+pub(crate) fn get_bufer_file(file: &str) -> BufReader<File> {
+    let file = File::open(file).expect("Не удалось открыть файл");
+    BufReader::new(file)
+}
+
+pub(crate) fn get_lines(file: &str) -> usize {
+    let file = File::open(file).expect("Unable to open the file");
+    let reader = BufReader::new(file);
+    let mut line_count = 0;
+    for _line in reader.lines() {
+        line_count += 1;
+    }
+    line_count
 }
