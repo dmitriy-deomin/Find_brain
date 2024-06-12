@@ -7,10 +7,11 @@ use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 use base58::{FromBase58, ToBase58};
 use rand::Rng;
+use ripemd::{Ripemd160,Digest as Ripemd160Digest};
 
 use crate::color::{blue, cyan, green, magenta, red};
 use rustils::parse::boolean::string_to_bool;
-use sha2::{Digest, Sha256};
+use sha2::{Sha256,Digest};
 use sv::util::hash160;
 use tiny_keccak::{Hasher, Keccak};
 
@@ -84,7 +85,7 @@ async fn main() {
     let find_eth;
     let find_btc;
 
-
+    println!("{}", blue("--"));
     //провереряем если файл с хешами битка
     //--------------------------------------------------------------------------------------------
     if fs::metadata(Path::new("btc_h160.bin")).is_ok() {
@@ -124,6 +125,8 @@ async fn main() {
         println!("{}", blue(format!("конвертировано адресов в h160:{}/{}", green(len_btc_txt), green(len_btc))));
     }
     //-----------------------------------------------------------------------------------------------
+
+    println!("{}", blue("--"));
 
     //провереряем если файл с хешами ETH
     //--------------------------------------------------------------------------------------------
@@ -177,6 +180,7 @@ async fn main() {
     }
     //-----------------------------------------------------------------------------------------------
 
+    println!("{}", blue("--"));
 
     // запись BTC в базу
     let mut colichestvo_btc = 0;
@@ -198,7 +202,8 @@ async fn main() {
     //включим или выключим проверку ETH
     find_btc = if colichestvo_btc>0{ true }else { false };
     println!("{}{}", blue("Данные BTC успешно загружены в базу:"), green(format!("{colichestvo_btc} шт")));
-    println!("{}{}", blue("ГЕНЕРАЦИЯ BTC АДДРЕССОВ:"), green(format!("{}",find_btc)));
+
+    println!("{}", blue("--"));
 
     //запись ETH в базу
     let mut colichestvo_eth = 0;
@@ -220,13 +225,17 @@ async fn main() {
     find_eth = if colichestvo_eth>0{ true }else { false };
 
     println!("{}{}", blue("Данные ETH успешно загружены в базу:"), green(format!("{colichestvo_eth} шт")));
-    println!("{}{}", blue("ГЕНЕРАЦИЯ ETH АДДРЕССОВ:"), green(format!("{}",find_eth)));
 
-
+    println!("{}", blue("--"));
     println!("{}{}", blue("ИТОГО ЗАГРУЖЕННО В БАЗУ:"), green(format!("{} шт", colichestvo_btc + colichestvo_eth)));
+    println!("{}", blue("--"));
+
 
     //ИНфо блок
     //||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+    println!("{}", blue("************************************"));
+    println!("{}{}", blue("ГЕНЕРАЦИЯ ETH АДДРЕССОВ:"), green(format!("{}",find_eth)));
+    println!("{}{}", blue("ГЕНЕРАЦИЯ BTC АДДРЕССОВ:"), green(format!("{}",find_btc)));
     println!("{}{}{}", blue("КОЛИЧЕСТВО ЯДЕР ПРОЦЕССОРА:"), green(cpu_core), blue(format!("/{count_cpu}")));
     println!("{}{}", blue("ДЛИНА ПАРОЛЯ:"), green(dlinn_a_pasvord));
     if alvabet == "0" {
@@ -253,6 +262,7 @@ async fn main() {
     } else { "" };
 
     println!("{}{}", blue("ОТОБРАЖЕНИЕ СКОРОСТИ И ТЕКУЩЕГО ПОДБОРА:"), green(show_info.clone()));
+    println!("{}", blue("************************************"));
     //|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
 
 
@@ -271,13 +281,13 @@ async fn main() {
     //будет храниться список запушеных потоков(каналов для связи)
     let mut channels = Vec::new();
 
-    let bloom_filter = Arc::new(database);
+    let database = Arc::new(database);
 
     for ch in 0..cpu_core {
         //создаём для каждого потока отдельный канал для связи
         let (sender, receiver) = mpsc::channel();
 
-        let database_cl = bloom_filter.clone();
+        let database_cl = database.clone();
 
         //главный поток
         let main_sender = main_sender.clone();
@@ -302,7 +312,8 @@ async fn main() {
                 sha256.update(format!("{prefix}{}", password_string));
                 let h = sha256.finalize().0;
 
-                // Получаем публичный ключ
+                // Получаем публичный ключ для разных систем , адрюха не дружит с ice_library
+                //------------------------------------------------------------------------
                 #[cfg(windows)]
                     let (pk_u,pk_c)={
                     let p = ice_library.privatekey_to_publickey(&h);
@@ -316,8 +327,9 @@ async fn main() {
                     let public_key = PublicKey::from_secret_key(&secp, &secret_key);
                     (public_key.serialize_uncompressed(),public_key.serialize())
                 };
+                //----------------------------------------------------------------------------
 
-                //проверка наличия в базе ETH
+                //проверка наличия в базе BTC
                 if find_btc{
                     //получем из них хеш160
                     let h160c = hash160(&pk_c[0..]).0;
@@ -337,6 +349,15 @@ async fn main() {
                         let address = get_legacy(h160u, 0x00);
                         let private_key_u = hex_to_wif_uncompressed(&h.to_vec());
                         print_and_save(hex::encode(&h), &private_key_u, address, &password_string);
+                    }
+
+                    let bip49_hash160 = bip_49_hash160c(h160c);
+
+                    //проверка наличия в базе BTC bip49 3.....
+                    if database_cl.contains(&bip49_hash160) {
+                        let address = get_bip49_address(&bip49_hash160,BIP49_BTC);
+                        let private_key_c = hex_to_wif_compressed(&h.to_vec());
+                        print_and_save(hex::encode(&h), &private_key_c, address, &password_string);
                     }
                 }
 
@@ -571,10 +592,12 @@ fn print_and_save_eth(hex: String, addres: String, password_string: &String) {
     println!("{}", cyan("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"));
 }
 
-fn sha256d(data: &[u8]) -> Vec<u8> {
-    let first_hash = Sha256::digest(data);
-    let second_hash = Sha256::digest(first_hash);
-    second_hash.to_vec()
+fn sha256d(data: &[u8]) -> [u8; 32] {
+    let digest1 = Sha256::digest(data);
+    let digest2 = Sha256::digest(&digest1);
+    let mut result = [0u8; 32];
+    result.copy_from_slice(&digest2);
+    result
 }
 
 pub fn get_legacy(hash160: [u8; 20], coin: u8) -> String {
@@ -619,33 +642,32 @@ fn eth_address_to_bytes(address: &str) -> Result<[u8; 20], String> {
         Err(_) => Err(format!("Decoding failed for address: {}", address)),
     }
 }
+
 //bip49------------------------------------------------------
-// pub fn dla_bip_49(public_key: &[u8]) -> Vec<u8> {
-//     let digest1 = Sha256::digest(&public_key);
-//
-//     let hash160_1 = ripemd::Ripemd160::digest(&digest1);
-//
-//     let mut v = Vec::with_capacity(20);
-//     v.push(0x00);
-//     v.push(0x14);
-//     v.extend_from_slice(&hash160_1);
-//
-//     let digest2 = Sha256::digest(&v);
-//     let hash160_3 = ripemd::Ripemd160::digest(&digest2);
-//     let hash_slice = hash160_3;
-//     hash_slice.to_vec()
-// }
-//
-// pub fn get_bip49(hash160_3: &[u8], coin: u8) -> String {
-//
-//     let mut v = Vec::with_capacity(25);
-//     v.push(coin);
-//     v.extend_from_slice(&hash160_3);
-//
-//     let checksum = sha256d(&v);
-//     v.extend_from_slice(&checksum[0..4]);
-//     v.to_base58()
-// }
+pub fn bip_49_hash160c(hash160c: [u8; 20]) -> [u8; 20] {
+    let mut v = [0u8; 22]; // 22 байта, так как 1 байт для 0x00, 1 байт для 0x14 и 20 байт для hash160c
+    v[0] = 0x00;
+    v[1] = 0x14;
+    v[2..].copy_from_slice(&hash160c);
+
+    let digest2 = Sha256::digest(&v);
+    let hash160_3 = Ripemd160::digest(&digest2);
+
+    let mut result = [0u8; 20];
+    result.copy_from_slice(&hash160_3);
+    result
+}
+
+pub fn get_bip49_address(hash160_3: &[u8; 20], coin: u8) -> String {
+    let mut v = [0u8; 25];
+    v[0] = coin;
+    v[1..21].copy_from_slice(hash160_3);
+
+    let checksum = sha256d(&v[..21]);
+    v[21..25].copy_from_slice(&checksum[0..4]);
+
+    v.to_base58().to_string()
+}
 //------------------------------------------------------------------------
 
 // TRX
