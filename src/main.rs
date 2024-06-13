@@ -61,6 +61,9 @@ async fn main() {
         }
     };
 
+    //рандом
+    let mut rng = rand::thread_rng();
+
     //количество ядер процессора
     let count_cpu = num_cpus::get();
 
@@ -74,6 +77,8 @@ async fn main() {
     let comb_perebor_left_: usize = first_word(&conf[7].to_string()).to_string().parse::<usize>().unwrap();
     let minikey = string_to_bool(first_word(&conf[8].to_string()).to_string());
     let show_info = string_to_bool(first_word(&conf[9].to_string()).to_string());
+    let rand_alfabet = string_to_bool(first_word(&conf[10].to_string()).to_string());
+    let size_rand_alfabet = first_word(&conf[11].to_string()).to_string().parse::<usize>().unwrap();
     //---------------------------------------------------------------------
 
     //если укажут меньше или 0
@@ -238,17 +243,40 @@ async fn main() {
     println!("{}{}", blue("ГЕНЕРАЦИЯ BTC АДДРЕССОВ:"), green(format!("{}",find_btc)));
     println!("{}{}{}", blue("КОЛИЧЕСТВО ЯДЕР ПРОЦЕССОРА:"), green(cpu_core), blue(format!("/{count_cpu}")));
     println!("{}{}", blue("ДЛИНА ПАРОЛЯ:"), green(dlinn_a_pasvord));
-    if alvabet == "0" {
-        println!("{}{}", blue("АЛФАВИТ:"), green("ВСЕ ВОЗМОЖНЫЕ"));
-    } else {
-        println!("{}{}", blue("АЛФАВИТ:"), green(&alvabet));
-    }
+
+    //алфавит
+    //-------------------------------------------------------------------------
+    let alvabet = if rand_alfabet{
+        //замудреная штука для отбора из строки рандомных символов
+        let charset_chars: Vec<char> = alvabet.chars().collect();
+        let charset_len = charset_chars.len();
+        let mut current_combination = vec![0; size_rand_alfabet];
+        for f in 0..size_rand_alfabet {
+            current_combination[f] = rng.gen_range(0..charset_len);
+        }
+        let rndalf =   String::from_iter(
+            current_combination.iter().map(|&idx| charset_chars[idx])
+        );
+        println!("{}{}", blue("СЛУЧАЙНЫЕ ИЗ АЛФАВИТА:"), green(rand_alfabet));
+        println!("{}{}", blue("-КОЛИЧЕСТВО СЛУЧАЙНЫХ ИЗ АЛФАВИТА:"), green(size_rand_alfabet));
+        println!("{}{}", blue("-АЛФАВИТ:"), green(&rndalf));
+        rndalf
+    }else {
+        println!("{}{}", blue("СЛУЧАЙНЫЕ ИЗ АЛФАВИТА:"), green(rand_alfabet));
+        if alvabet == "0" {
+            println!("{}{}", blue("АЛФАВИТ:"), green("ВСЕ ВОЗМОЖНЫЕ"));
+        } else {
+            println!("{}{}", blue("АЛФАВИТ:"), green(&alvabet));
+        }
+        alvabet
+    };
+    //-------------------------------------------------------------------------------
+
     println!("{}{}", blue("ДОБАВЛЕНИЕ ПРОБЕЛА:"), green(probel.clone()));
     if mode == 0 {
         println!("{}{}", blue("УВЕЛИЧЕНИЕ ДЛИННЫ ПАРОЛЯ:"), green(len_uvelichenie.clone()));
         println!("{}{}", blue("НАЧАЛО ПЕРЕБОРА:"), green(start_perebor.clone()));
     }
-    // println!("{}{}/{}", blue("H160 АДРЕСОВ ЗАГРУЖЕННО:"), green(database.len()), green(file_content.len()));
     println!("{}{}", blue("РЕЖИМ ГЕНЕРАЦИИ ПАРОЛЯ:"), green(get_mode_text(mode)));
     if mode == 2 {
         println!("{}{}", blue("КОЛИЧЕСТВО ЗНАКОВ ПЕРЕБОРА СЛЕВА:"), green(comb_perebor_left));
@@ -385,8 +413,6 @@ async fn main() {
     let mut start = Instant::now();
     let mut speed: u32 = 0;
     let one_sek = Duration::from_secs(1);
-
-    let mut rng = rand::thread_rng();
 
     let alfabet_all = if alvabet == "0".to_string() { true } else { false };
 
