@@ -6,7 +6,8 @@ use std::path::Path;
 use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 use base58::{FromBase58, ToBase58};
-use rand::Rng;
+use rand::{Rng, thread_rng};
+use rand::seq::SliceRandom;
 use ripemd::{Ripemd160,Digest as Ripemd160Digest};
 
 use crate::color::{blue, cyan, green, magenta, red};
@@ -14,8 +15,6 @@ use rustils::parse::boolean::string_to_bool;
 use sha2::{Sha256,Digest};
 use sv::util::hash160;
 use tiny_keccak::{Hasher, Keccak};
-
-//use tiny_keccak::Keccak;
 
 #[cfg(not(windows))]
 use rust_secp256k1::{PublicKey, Secp256k1, SecretKey};
@@ -247,16 +246,7 @@ async fn main() {
     //алфавит
     //-------------------------------------------------------------------------
     let alvabet = if rand_alfabet{
-        //замудреная штука для отбора из строки рандомных символов
-        let charset_chars: Vec<char> = alvabet.chars().collect();
-        let charset_len = charset_chars.len();
-        let mut current_combination = vec![0; size_rand_alfabet];
-        for f in 0..size_rand_alfabet {
-            current_combination[f] = rng.gen_range(0..charset_len);
-        }
-        let rndalf =   String::from_iter(
-            current_combination.iter().map(|&idx| charset_chars[idx])
-        );
+        let rndalf =  get_rand_alfabet(alvabet,size_rand_alfabet);
         println!("{}{}", blue("СЛУЧАЙНЫЕ ИЗ АЛФАВИТА:"), green(rand_alfabet));
         println!("{}{}", blue("-КОЛИЧЕСТВО СЛУЧАЙНЫХ ИЗ АЛФАВИТА:"), green(size_rand_alfabet));
         println!("{}{}", blue("-АЛФАВИТ:"), green(&rndalf));
@@ -754,4 +744,20 @@ fn jdem_user_to_close_programm(){
     println!("{}", blue("Нажмите Enter, чтобы завершить программу..."));
     let mut input = String::new();
     io::stdin().read_line(&mut input).expect("Ошибка чтения строки");
+}
+
+
+//берем случайные символы из строки
+fn get_rand_alfabet(alvabet:String,size_rand_alfabet:usize)->String{
+    let mut rng = thread_rng();
+    let mut charset_chars: Vec<char> = alvabet.chars().collect();
+
+    // Перемешиваем символы
+    charset_chars.shuffle(&mut rng);
+
+    // Берем первые size_rand_alfabet символов
+    let selected_chars: Vec<char> = charset_chars.into_iter().take(size_rand_alfabet).collect();
+
+    // Создаем строку из выбранных символов
+    selected_chars.into_iter().collect()
 }
