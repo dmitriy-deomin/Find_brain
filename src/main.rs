@@ -238,8 +238,8 @@ async fn main() {
     //ИНфо блок
     //||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
     println!("{}", blue("************************************"));
-    println!("{}{}", blue("ГЕНЕРАЦИЯ ETH АДДРЕССОВ:"), green(format!("{}",find_eth)));
-    println!("{}{}", blue("ГЕНЕРАЦИЯ BTC АДДРЕССОВ:"), green(format!("{}",find_btc)));
+    println!("{}{}", blue("ГЕНЕРАЦИЯ ETH АДРЕСОВ:"), green(format!("{}",find_eth)));
+    println!("{}{}", blue("ГЕНЕРАЦИЯ BTC АДРЕСОВ:"), green(format!("{}",find_btc)));
     println!("{}{}{}", blue("КОЛИЧЕСТВО ЯДЕР ПРОЦЕССОРА:"), green(cpu_core), blue(format!("/{count_cpu}")));
     println!("{}{}", blue("ДЛИНА ПАРОЛЯ:"), green(dlinn_a_pasvord));
 
