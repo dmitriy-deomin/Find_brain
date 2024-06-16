@@ -489,11 +489,13 @@ async fn main() {
             if i == 0 && current_combination[0] == charset_len - 1 {
                 //если включенно увеличение длинны увеличим иначе выйдем из цикла
                 if len_uvelichenie {
+                    println!("{}{}", blue(format!("ДЛИНА ПАРОЛЯ:{} ПЕРЕБРАТА",green(dlinn_a_pasvord))),magenta(format!(" за:{:?} секунд",start.elapsed())));
                     dlinn_a_pasvord = dlinn_a_pasvord + 1;
                     current_combination = vec![0; dlinn_a_pasvord];
-                    println!("{}{:?}", blue("ДЛИНА ПАРОЛЯ:"), green(dlinn_a_pasvord));
+                    println!("{}{:?}", blue("ТЕКУЩАЯ ДЛИНА ПАРОЛЯ:"), green(dlinn_a_pasvord));
                 } else {
-                    println!("{}", blue("ГОТОВО"));
+                    println!("{}", blue(format!("ГОТОВО,перебраты все возможные из {} длинной {}",alvabet,dlinn_a_pasvord)));
+                    jdem_user_to_close_programm();
                     break;
                 }
             }
