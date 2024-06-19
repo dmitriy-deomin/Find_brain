@@ -1,18 +1,20 @@
 use std::fs::{File, OpenOptions};
 use std::{fs, io, thread};
 use std::collections::HashSet;
-use std::io::{BufRead, BufReader, BufWriter, Read, stdout, Write};
+use std::io::{BufRead, BufReader, BufWriter, Lines, Read, stdout, Write};
 use std::path::Path;
 use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 use base58::{FromBase58, ToBase58};
+use itertools::Itertools;
 use rand::{Rng, thread_rng};
+use rand::prelude::IteratorRandom;
 use rand::seq::SliceRandom;
-use ripemd::{Ripemd160,Digest as Ripemd160Digest};
+use ripemd::{Ripemd160, Digest as Ripemd160Digest};
 
 use crate::color::{blue, cyan, green, magenta, red};
 use rustils::parse::boolean::string_to_bool;
-use sha2::{Sha256,Digest};
+use sha2::{Sha256, Digest};
 use sv::util::hash160;
 use tiny_keccak::{Hasher, Keccak};
 
@@ -40,6 +42,7 @@ pub const LEGACY_LTC: u8 = 0x30;
 
 const BACKSPACE: char = 8u8 as char;
 const FILE_CONFIG: &str = "confBrain.txt";
+const FILE_LIST: &str = "list.txt";
 
 
 #[tokio::main]
@@ -90,7 +93,7 @@ async fn main() {
     let find_btc;
 
     println!("{}", blue("--"));
-    //провереряем если файл с хешами битка
+    //провереряем если файл с хешами BTC
     //--------------------------------------------------------------------------------------------
     if fs::metadata(Path::new("btc_h160.bin")).is_ok() {
         println!("{}", green("файл btc_h160.bin уже существует,конвертирование пропущено"));
@@ -105,6 +108,48 @@ async fn main() {
         //ищем в списке нужные делаем им харакири и ложим обрубки в файл
         let mut len_btc = 0;
         for (index, address) in get_bufer_file("btc.txt").lines().enumerate() {
+            let binding = match address.expect("REASON").from_base58() {
+                Ok(value) => value,
+                Err(_err) => {
+                    eprintln!("{}", red(format!("ОШИБКА ДЕКОДИРОВАНИЯ В base58 строка:{}", index + 1)));
+                    continue; // Пропускаем этот адрес и переходим к следующему
+                }
+            };
+
+            let mut a: [u8; 20] = [0; 20];
+
+            if binding.len() >= 21 {
+                a.copy_from_slice(&binding.as_slice()[1..21]);
+                if let Err(e) = file.write_all(&a) {
+                    eprintln!("Не удалось записать в файл: {}", e);
+                } else {
+                    len_btc = len_btc + 1;
+                }
+            } else {
+                eprintln!("{}", red(format!("ОШИБКА,АДРЕСС НЕ ВАЛИДЕН строка:{}", index + 1)));
+            }
+        }
+        println!("{}", blue(format!("конвертировано адресов в h160:{}/{}", green(len_btc_txt), green(len_btc))));
+    }
+    //-----------------------------------------------------------------------------------------------
+
+    println!("{}", blue("--"));
+
+    //провереряем если файл с хешами DOGECOIN
+    //--------------------------------------------------------------------------------------------
+    if fs::metadata(Path::new("dogecoin_h160.bin")).is_ok() {
+        println!("{}", green("файл dogecoin_h160.bin уже существует,конвертирование пропущено"));
+    } else {
+        //проверяем есть ли файл(создаём) и считаем сколько строк
+        let len_btc_txt = get_len_find_create("dogecoin.txt");
+
+        println!("{}", blue("конвертирование адресов в h160 и сохранение в dogecoin_h160.bin"));
+        //конвертируем в h160 и записываем в файл рядом
+        //создаём файл
+        let mut file = File::create("dogecoin_h160.bin").unwrap();
+        //ищем в списке нужные делаем им харакири и ложим обрубки в файл
+        let mut len_btc = 0;
+        for (index, address) in get_bufer_file("dogecoin.txt").lines().enumerate() {
             let binding = match address.expect("REASON").from_base58() {
                 Ok(value) => value,
                 Err(_err) => {
@@ -203,11 +248,33 @@ async fn main() {
             _ => {}
         }
     }
-    //включим или выключим проверку ETH
-    find_btc = if colichestvo_btc>0{ true }else { false };
     println!("{}{}", blue("Данные BTC успешно загружены в базу:"), green(format!("{colichestvo_btc} шт")));
-
     println!("{}", blue("--"));
+
+
+    // запись DOGECOIN в базу
+    let mut colichestvo_dogecoin = 0;
+    println!("{}", blue("ЗАПИСЬ DOGECOIN ДАННЫХ В БАЗУ.."));
+    let file = File::open("dogecoin_h160.bin").expect("неудалось открыть файл");
+    let mut reader = BufReader::new(file);
+    loop {
+        let mut array = [0u8; 20];
+        match reader.read_exact(&mut array) {
+            Ok(_) => {
+                colichestvo_dogecoin = colichestvo_dogecoin + 1;
+                database.insert(array);
+            }
+            Err(ref e) if e.kind() == io::ErrorKind::UnexpectedEof => break,
+            _ => {}
+        }
+    }
+    println!("{}{}", blue("Данные DOGECOIN успешно загружены в базу:"), green(format!("{colichestvo_dogecoin} шт")));
+    println!("{}", blue("--"));
+
+
+    //включим или выключим проверку ETH
+    find_btc = if colichestvo_btc+colichestvo_dogecoin > 0 { true } else { false };
+
 
     //запись ETH в базу
     let mut colichestvo_eth = 0;
@@ -226,32 +293,32 @@ async fn main() {
         }
     }
     //включим или выключим проверку ETH
-    find_eth = if colichestvo_eth>0{ true }else { false };
+    find_eth = if colichestvo_eth > 0 { true } else { false };
 
     println!("{}{}", blue("Данные ETH успешно загружены в базу:"), green(format!("{colichestvo_eth} шт")));
 
     println!("{}", blue("--"));
-    println!("{}{}", blue("ИТОГО ЗАГРУЖЕННО В БАЗУ:"), green(format!("{} шт", colichestvo_btc + colichestvo_eth)));
+    println!("{}{}", blue("ИТОГО ЗАГРУЖЕННО В БАЗУ:"), green(format!("{} шт", colichestvo_btc + colichestvo_eth+colichestvo_dogecoin)));
     println!("{}", blue("--"));
 
 
     //ИНфо блок
     //||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
     println!("{}", blue("************************************"));
-    println!("{}{}", blue("ГЕНЕРАЦИЯ ETH АДРЕСОВ:"), green(format!("{}",find_eth)));
-    println!("{}{}", blue("ГЕНЕРАЦИЯ BTC АДРЕСОВ:"), green(format!("{}",find_btc)));
+    println!("{}{}", blue("ГЕНЕРАЦИЯ ETH АДРЕСОВ:"), green(format!("{}", find_eth)));
+    println!("{}{}", blue("ГЕНЕРАЦИЯ BTC АДРЕСОВ:"), green(format!("{}", find_btc)));
     println!("{}{}{}", blue("КОЛИЧЕСТВО ЯДЕР ПРОЦЕССОРА:"), green(cpu_core), blue(format!("/{count_cpu}")));
     println!("{}{}", blue("ДЛИНА ПАРОЛЯ:"), green(dlinn_a_pasvord));
 
     //алфавит
     //-------------------------------------------------------------------------
-    let alvabet = if rand_alfabet{
-        let rndalf =  get_rand_alfabet(alvabet,size_rand_alfabet);
+    let alvabet = if rand_alfabet {
+        let rndalf = get_rand_alfabet(alvabet, size_rand_alfabet);
         println!("{}{}", blue("СЛУЧАЙНЫЕ ИЗ АЛФАВИТА:"), green(rand_alfabet));
         println!("{}{}", blue("-КОЛИЧЕСТВО СЛУЧАЙНЫХ ИЗ АЛФАВИТА:"), green(size_rand_alfabet));
         println!("{}{}", blue("-АЛФАВИТ:"), green(&rndalf));
         rndalf
-    }else {
+    } else {
         println!("{}{}", blue("СЛУЧАЙНЫЕ ИЗ АЛФАВИТА:"), green(rand_alfabet));
         if alvabet == "0" {
             println!("{}{}", blue("АЛФАВИТ:"), green("ВСЕ ВОЗМОЖНЫЕ"));
@@ -262,6 +329,7 @@ async fn main() {
     };
     //-------------------------------------------------------------------------------
 
+
     println!("{}{}", blue("ДОБАВЛЕНИЕ ПРОБЕЛА:"), green(probel.clone()));
     if mode == 0 {
         println!("{}{}", blue("УВЕЛИЧЕНИЕ ДЛИННЫ ПАРОЛЯ:"), green(len_uvelichenie.clone()));
@@ -270,6 +338,12 @@ async fn main() {
     println!("{}{}", blue("РЕЖИМ ГЕНЕРАЦИИ ПАРОЛЯ:"), green(get_mode_text(mode)));
     if mode == 2 {
         println!("{}{}", blue("КОЛИЧЕСТВО ЗНАКОВ ПЕРЕБОРА СЛЕВА:"), green(comb_perebor_left));
+    }
+    if mode == 3 {
+        println!("{}", blue("ВКЛЮЧЕННО ИСПОЛЬЗОВАНИЕ СПИСКА:"));
+        //Чтение списка шаблонов, и если их нет создадим
+        //-----------------------------------------------------------------
+        get_len_find_create(FILE_LIST);
     }
     println!("{}{}", blue("ДОБАВЛЕНИЕ S В НАЧАЛЕ(для поиска миникей):"), green(minikey.clone()));
     let prefix = if minikey {
@@ -285,7 +359,7 @@ async fn main() {
 
 
     //проверка есть ли в базе вообще чего
-    if find_btc == false && find_eth == false{
+    if find_btc == false && find_eth == false {
         println!("{}", red("БАЗА ПУСТА\nпоместите рядом с программой текстовые файлы со списком адресов:\nbtc.txt eth.txt"));
         jdem_user_to_close_programm();
         return;
@@ -333,28 +407,30 @@ async fn main() {
                 // Получаем публичный ключ для разных систем , адрюха не дружит с ice_library
                 //------------------------------------------------------------------------
                 #[cfg(windows)]
-                    let (pk_u,pk_c)={
+                    let (pk_u, pk_c) = {
                     let p = ice_library.privatekey_to_publickey(&h);
-                    (p,ice_library.publickey_uncompres_to_compres(&p))
+                    (p, ice_library.publickey_uncompres_to_compres(&p))
                 };
 
                 #[cfg(not(windows))]
-                    let (pk_u,pk_c)= {
+                    let (pk_u, pk_c) = {
                     // Создаем секретный ключ из байт
                     let secret_key = SecretKey::from_slice(&h).expect("32 bytes, within curve order");
                     let public_key = PublicKey::from_secret_key(&secp, &secret_key);
-                    (public_key.serialize_uncompressed(),public_key.serialize())
+                    (public_key.serialize_uncompressed(), public_key.serialize())
                 };
                 //----------------------------------------------------------------------------
 
                 //проверка наличия в базе BTC
-                if find_btc{
+                if find_btc {
                     //получем из них хеш160
                     let h160c = hash160(&pk_c[0..]).0;
 
                     //проверка наличия в базе BTC compress
                     if database_cl.contains(&h160c) {
-                        let address = get_legacy(h160c, 0x00);
+                        let address_btc = get_legacy(h160c, LEGACY_BTC);
+                        let address_doge = get_legacy(h160c, LEGACY_DOGE);
+                        let address = format!("\nBTC compress:{}\nDOGECOIN compress:{}",address_btc,address_doge);
                         let private_key_c = hex_to_wif_compressed(&h.to_vec());
                         print_and_save(hex::encode(&h), &private_key_c, address, &password_string);
                     }
@@ -364,7 +440,9 @@ async fn main() {
 
                     //проверка наличия в базе BTC uncompres
                     if database_cl.contains(&h160u) {
-                        let address = get_legacy(h160u, 0x00);
+                        let address_btc = get_legacy(h160u, LEGACY_BTC);
+                        let address_doge = get_legacy(h160u, LEGACY_DOGE);
+                        let address = format!("\nBTC uncompres:{}\nDOGECOIN uncompres:{}",address_btc,address_doge);
                         let private_key_u = hex_to_wif_uncompressed(&h.to_vec());
                         print_and_save(hex::encode(&h), &private_key_u, address, &password_string);
                     }
@@ -373,14 +451,16 @@ async fn main() {
 
                     //проверка наличия в базе BTC bip49 3.....
                     if database_cl.contains(&bip49_hash160) {
-                        let address = get_bip49_address(&bip49_hash160,BIP49_BTC);
+                        let address_btc = get_bip49_address(&bip49_hash160, BIP49_BTC);
+                        let address_doge = get_bip49_address(&bip49_hash160, BIP49_DOGE);
+                        let address = format!("\nBTC bip49:{}\nDOGECOIN bip49:{}",address_btc,address_doge);
                         let private_key_c = hex_to_wif_compressed(&h.to_vec());
                         print_and_save(hex::encode(&h), &private_key_c, address, &password_string);
                     }
                 }
 
                 //проверка наличия в базе ETH
-                if find_eth{
+                if find_eth {
                     if database_cl.contains(&get_eth_kessak_from_public_key(pk_u)) {
                         print_and_save_eth(hex::encode(&h), format!("0x{}", hex::encode(get_eth_kessak_from_public_key(pk_u))), &password_string);
                     }
@@ -391,7 +471,7 @@ async fn main() {
             }
         });
         //зажигание хз костыль получился(выполняеться один раз при запуске потока)
-        sender.send("start".to_string()).unwrap();
+        sender.send("инициализация потока, пароль <ничто> найденые адреса вне диапазона, хз".to_string()).unwrap();
         channels.push(sender);
     }
     //---------------------------------------------------------------------------------------------
@@ -433,50 +513,145 @@ async fn main() {
     //-----------------------------------------------------------------------------------
 
 
+    let binding = if mode == 3 {
+        let lines = read_lines(FILE_LIST);
+        // Преобразуем строки в вектор
+        lines.filter_map(Result::ok).collect::<Vec<String>>()
+    } else {
+        let lines = read_lines(FILE_LIST);
+        // Преобразуем строки в вектор
+        lines.filter_map(Result::ok).collect::<Vec<String>>()
+    };
+
+    let mut list_words = binding.iter().combinations(dlinn_a_pasvord);
+
     //--ГЛАВНЫЙ ЦИКЛ
     // слушаем ответы потоков и если есть шлём новую задачу
     //----------------------------------------------------------------------------------------------
     for received in main_receiver {
         let ch = received;
 
-        // следующая комбинация пароля если алфавит пустой будем по всем возможным перебирать
-        let password_string: String = if alfabet_all {
-            current_combination.iter().map(|&c| char::from_u32(c as u32).unwrap_or(' ')).collect()
-        } else {
-            String::from_iter(
-                current_combination.iter().map(|&idx| charset_chars[idx])
-            )
-        };
+        if mode == 3 {
+            // Перебираем все возможные комбинации строк
+            // Получаем следующую комбинацию
+            // let combined_line = if let Some(vec_of_strings) = list_words.next() {
+            //     let combined_line = vec_of_strings
+            //         .iter()
+            //         .map(|s| s.as_str())
+            //         .collect::<Vec<&str>>()
+            //         .join(" ");
+            //     combined_line
+            // } else {
+            //     println!("{}{}", blue(format!("ДЛИНА ПАРОЛЯ:{} ПЕРЕБРАТА", green(dlinn_a_pasvord))), magenta(format!(" за:{:?}", start.elapsed())));
+            //     dlinn_a_pasvord = dlinn_a_pasvord + 1;
+            //     list_words = binding.iter().combinations(dlinn_a_pasvord);
+            //     println!("{}{:?}", blue("ТЕКУЩАЯ ДЛИНА ПАРОЛЯ:"), green(dlinn_a_pasvord));
+            //     "ПЕРЕБРАТЫ ВСЕ ВОЗМОЖНЫЕ КОМБИНАЦИИ".to_string()
+            // };
+
+            //получаем случайную
+            let combined_line = if let Some(random_combination) = list_words.clone().choose(&mut rng) {
+                let combined_line = random_combination
+                    .iter()
+                    .map(|s| s.as_str())
+                    .collect::<Vec<&str>>()
+                    .join(" ");
+                combined_line
+            } else {
+                "No combinations available".to_string()
+            };
 
 
-        if show_info {
-            //измеряем скорость и шлём прогресс
-            speed = speed + 1;
-            if start.elapsed() >= one_sek {
-                let mut stdout = stdout();
-                print!("{}\r{}", BACKSPACE, green(format!("SPEED:{speed}/s|{}", (format!("{}{}", prefix, password_string)))));
-                stdout.flush().unwrap();
-                start = Instant::now();
-                speed = 0;
+
+            if show_info {
+                //измеряем скорость и шлём прогресс
+                speed = speed + 1;
+                if start.elapsed() >= one_sek {
+                    let mut stdout = stdout();
+                    print!("{}\r{}", BACKSPACE, green(format!("SPEED:{speed}/s|{}", (format!("{}{}", prefix, combined_line)))));
+                    stdout.flush().unwrap();
+                    start = Instant::now();
+                    speed = 0;
+                }
             }
-        }
 
-        // Отправляем новую в свободный канал
-        channels[ch].send(password_string).unwrap();
+            // Отправляем новую в свободный канал
+            channels[ch].send(combined_line).unwrap();
 
-        //перебор
-        if mode == 0 {
-            let mut i = dlinn_a_pasvord;
-            while i > 0 {
-                i -= 1;
-                if alfabet_all {
-                    if current_combination[i] + 1 < 0x10FFFF {
-                        current_combination[i] += 1;
-                        break;
+        } else {
+            // следующая комбинация пароля если алфавит пустой будем по всем возможным перебирать
+            let password_string: String = if alfabet_all {
+                current_combination.iter().map(|&c| char::from_u32(c as u32).unwrap_or(' ')).collect()
+            } else {
+                String::from_iter(
+                    current_combination.iter().map(|&idx| charset_chars[idx])
+                )
+            };
+
+            if show_info {
+                //измеряем скорость и шлём прогресс
+                speed = speed + 1;
+                if start.elapsed() >= one_sek {
+                    let mut stdout = stdout();
+                    print!("{}\r{}", BACKSPACE, green(format!("SPEED:{speed}/s|{}", (format!("{}{}", prefix, password_string)))));
+                    stdout.flush().unwrap();
+                    start = Instant::now();
+                    speed = 0;
+                }
+            }
+
+            // Отправляем новую в свободный канал
+            channels[ch].send(password_string).unwrap();
+
+            //перебор
+            if mode == 0 {
+                let mut i = dlinn_a_pasvord;
+                while i > 0 {
+                    i -= 1;
+                    if alfabet_all {
+                        if current_combination[i] + 1 < 0x10FFFF {
+                            current_combination[i] += 1;
+                            break;
+                        } else {
+                            current_combination[i] = 0;
+                        }
                     } else {
-                        current_combination[i] = 0;
+                        if current_combination[i] + 1 < charset_len {
+                            current_combination[i] += 1;
+                            break;
+                        } else {
+                            current_combination[i] = 0;
+                        }
                     }
-                } else {
+                }
+
+                if i == 0 && current_combination[0] == charset_len - 1 {
+                    //если включенно увеличение длинны увеличим иначе выйдем из цикла
+                    if len_uvelichenie {
+                        println!("{}{}", blue(format!("ДЛИНА ПАРОЛЯ:{} ПЕРЕБРАТА", green(dlinn_a_pasvord))), magenta(format!(" за:{:?}", start.elapsed())));
+                        dlinn_a_pasvord = dlinn_a_pasvord + 1;
+                        current_combination = vec![0; dlinn_a_pasvord];
+                        println!("{}{:?}", blue("ТЕКУЩАЯ ДЛИНА ПАРОЛЯ:"), green(dlinn_a_pasvord));
+                    } else {
+                        println!("{}", blue(format!("ГОТОВО,перебраты все возможные из {} длинной {}", alvabet, dlinn_a_pasvord)));
+                        jdem_user_to_close_programm();
+                        break;
+                    }
+                }
+            }
+            //рандом
+            if mode == 1 {
+                for f in 0..dlinn_a_pasvord {
+                    current_combination[f] = rng.gen_range(0..charset_len);
+                }
+            }
+
+            //комбинированный
+            if mode == 2 {
+                //будем переберать слева указаное количество
+                let mut i = comb_perebor_left;
+                while i > 0 {
+                    i -= 1;
                     if current_combination[i] + 1 < charset_len {
                         current_combination[i] += 1;
                         break;
@@ -484,51 +659,16 @@ async fn main() {
                         current_combination[i] = 0;
                     }
                 }
-            }
 
-            if i == 0 && current_combination[0] == charset_len - 1 {
-                //если включенно увеличение длинны увеличим иначе выйдем из цикла
-                if len_uvelichenie {
-                    println!("{}{}", blue(format!("ДЛИНА ПАРОЛЯ:{} ПЕРЕБРАТА",green(dlinn_a_pasvord))),magenta(format!(" за:{:?}",start.elapsed())));
-                    dlinn_a_pasvord = dlinn_a_pasvord + 1;
-                    current_combination = vec![0; dlinn_a_pasvord];
-                    println!("{}{:?}", blue("ТЕКУЩАЯ ДЛИНА ПАРОЛЯ:"), green(dlinn_a_pasvord));
-                } else {
-                    println!("{}", blue(format!("ГОТОВО,перебраты все возможные из {} длинной {}",alvabet,dlinn_a_pasvord)));
-                    jdem_user_to_close_programm();
-                    break;
-                }
-            }
-        }
-        //рандом
-        if mode == 1 {
-            for f in 0..dlinn_a_pasvord {
-                current_combination[f] = rng.gen_range(0..charset_len);
-            }
-        }
-
-        //комбинированный
-        if mode == 2 {
-            //будем переберать слева указаное количество
-            let mut i = comb_perebor_left;
-            while i > 0 {
-                i -= 1;
-                if current_combination[i] + 1 < charset_len {
-                    current_combination[i] += 1;
-                    break;
-                } else {
-                    current_combination[i] = 0;
-                }
-            }
-
-            if i == 0 && current_combination[0] == charset_len - 1 {
-                for f in 0..dlinn_a_pasvord {
-                    //заполняем слева начальными значениями
-                    if f < comb_perebor_left {
-                        current_combination[f] = 0;
-                    } else {
-                        //остальные рандомно
-                        current_combination[f] = rng.gen_range(0..charset_len);
+                if i == 0 && current_combination[0] == charset_len - 1 {
+                    for f in 0..dlinn_a_pasvord {
+                        //заполняем слева начальными значениями
+                        if f < comb_perebor_left {
+                            current_combination[f] = 0;
+                        } else {
+                            //остальные рандомно
+                            current_combination[f] = rng.gen_range(0..charset_len);
+                        }
                     }
                 }
             }
@@ -715,7 +855,9 @@ pub fn get_len_find_create(coin: &str) -> usize {
             print!("{}{}", blue("ФАЙЛ НЕ НАЙДЕН,ИСПОЛЬЗУЕМ ВСТРОЕНЫЙ:"), green(format!("{coin}:")));
             let dockerfile = match coin {
                 "btc.txt" => { include_str!("btc.txt") }
+                "dogecoin.txt" => { include_str!("dogecoin.txt") }
                 "eth.txt" => { include_str!("eth.txt") }
+                "list.txt" => { include_str!("bip39_words.txt") }
                 _ => { include_str!("btc.txt") }
             };
             add_v_file(coin, dockerfile.to_string());
@@ -731,6 +873,12 @@ pub(crate) fn get_bufer_file(file: &str) -> BufReader<File> {
     BufReader::new(file)
 }
 
+// Функция для чтения строк из файла
+pub(crate) fn read_lines(file: &str) -> Lines<BufReader<File>> {
+    let file = File::open(file).expect("Не удалось открыть файл");
+    BufReader::new(file).lines()
+}
+
 pub(crate) fn get_lines(file: &str) -> usize {
     let file = File::open(file).expect("Unable to open the file");
     let reader = BufReader::new(file);
@@ -741,7 +889,7 @@ pub(crate) fn get_lines(file: &str) -> usize {
     line_count
 }
 
-fn jdem_user_to_close_programm(){
+fn jdem_user_to_close_programm() {
     // Ожидание ввода пользователя для завершения программы
     println!("{}", blue("Нажмите Enter, чтобы завершить программу..."));
     let mut input = String::new();
@@ -750,7 +898,7 @@ fn jdem_user_to_close_programm(){
 
 
 //берем случайные символы из строки
-fn get_rand_alfabet(alvabet:String,size_rand_alfabet:usize)->String{
+fn get_rand_alfabet(alvabet: String, size_rand_alfabet: usize) -> String {
     let mut rng = thread_rng();
     let mut charset_chars: Vec<char> = alvabet.chars().collect();
 
