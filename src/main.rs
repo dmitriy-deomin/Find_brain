@@ -229,6 +229,47 @@ async fn main() {
     }
     //-----------------------------------------------------------------------------------------------
 
+    //провереряем если файл с хешами TRX
+    println!("{}", blue("--"));
+    //провереряем если файл с хешами BTC
+    //--------------------------------------------------------------------------------------------
+    if fs::metadata(Path::new("trx_h160.bin")).is_ok() {
+        println!("{}", green("файл trx_h160.bin уже существует,конвертирование пропущено"));
+    } else {
+        //проверяем есть ли файл(создаём) и считаем сколько строк
+        let len_trx_txt = get_len_find_create("trx.txt");
+
+        println!("{}", blue("конвертирование адресов в h160 и сохранение в trx_h160.bin"));
+        //конвертируем в h160 и записываем в файл рядом
+        //создаём файл
+        let mut file = File::create("trx_h160.bin").unwrap();
+        //ищем в списке нужные делаем им харакири и ложим обрубки в файл
+        let mut len_trx = 0;
+        for (index, address) in get_bufer_file("trx.txt").lines().enumerate() {
+            let binding = match address.expect("REASON").from_base58() {
+                Ok(value) => value,
+                Err(_err) => {
+                    eprintln!("{}", red(format!("ОШИБКА ДЕКОДИРОВАНИЯ В base58 строка:{}", index + 1)));
+                    continue; // Пропускаем этот адрес и переходим к следующему
+                }
+            };
+
+            let mut a: [u8; 20] = [0; 20];
+
+            if binding.len() >= 21 {
+                a.copy_from_slice(&binding.as_slice()[1..21]);
+                if let Err(e) = file.write_all(&a) {
+                    eprintln!("Не удалось записать в файл: {}", e);
+                } else {
+                    len_trx = len_trx + 1;
+                }
+            } else {
+                eprintln!("{}", red(format!("ОШИБКА,АДРЕСС НЕ ВАЛИДЕН строка:{}", index + 1)));
+            }
+        }
+        println!("{}", blue(format!("конвертировано адресов в h160:{}/{}", green(len_trx_txt), green(len_trx))));
+    }
+    //-----------------------------------------------------------------------------------------------
     println!("{}", blue("--"));
 
     // запись BTC в базу
@@ -252,6 +293,26 @@ async fn main() {
     println!("{}", blue("--"));
 
 
+    // запись TRX в базу
+    let mut colichestvo_trx = 0;
+    println!("{}", blue("ЗАПИСЬ TRX ДАННЫХ В БАЗУ.."));
+    let file = File::open("trx_h160.bin").expect("неудалось открыть файл");
+    let mut reader = BufReader::new(file);
+    loop {
+        let mut array = [0u8; 20];
+        match reader.read_exact(&mut array) {
+            Ok(_) => {
+                colichestvo_trx = colichestvo_trx + 1;
+                database.insert(array);
+            }
+            Err(ref e) if e.kind() == io::ErrorKind::UnexpectedEof => break,
+            _ => {}
+        }
+    }
+    println!("{}{}", blue("Данные TRX успешно загружены в базу:"), green(format!("{colichestvo_trx} шт")));
+    println!("{}", blue("--"));
+
+
     // запись DOGECOIN в базу
     let mut colichestvo_dogecoin = 0;
     println!("{}", blue("ЗАПИСЬ DOGECOIN ДАННЫХ В БАЗУ.."));
@@ -271,11 +332,6 @@ async fn main() {
     println!("{}{}", blue("Данные DOGECOIN успешно загружены в базу:"), green(format!("{colichestvo_dogecoin} шт")));
     println!("{}", blue("--"));
 
-
-    //включим или выключим проверку ETH
-    find_btc = if colichestvo_btc+colichestvo_dogecoin > 0 { true } else { false };
-
-
     //запись ETH в базу
     let mut colichestvo_eth = 0;
     println!("{}", blue("ЗАПИСЬ ETH ДАННЫХ В БАЗУ.."));
@@ -292,10 +348,14 @@ async fn main() {
             _ => {}
         }
     }
-    //включим или выключим проверку ETH
-    find_eth = if colichestvo_eth > 0 { true } else { false };
-
     println!("{}{}", blue("Данные ETH успешно загружены в базу:"), green(format!("{colichestvo_eth} шт")));
+
+
+    //включим или выключим проверку BTC
+    find_btc = if colichestvo_btc+colichestvo_dogecoin > 0 { true } else { false };
+
+    //включим или выключим проверку ETH
+    find_eth = if colichestvo_eth+colichestvo_trx > 0 { true } else { false };
 
     println!("{}", blue("--"));
     println!("{}{}", blue("ИТОГО ЗАГРУЖЕННО В БАЗУ:"), green(format!("{} шт", colichestvo_btc + colichestvo_eth+colichestvo_dogecoin)));
@@ -462,7 +522,9 @@ async fn main() {
                 //проверка наличия в базе ETH
                 if find_eth {
                     if database_cl.contains(&get_eth_kessak_from_public_key(pk_u)) {
-                        print_and_save_eth(hex::encode(&h), format!("0x{}", hex::encode(get_eth_kessak_from_public_key(pk_u))), &password_string);
+                        let adr_eth = hex::encode(get_eth_kessak_from_public_key(pk_u));
+                        let adr_trx = get_trx_from_eth(adr_eth.clone());
+                        print_and_save_eth(hex::encode(&h), format!("\nETH 0x{adr_eth}\nTRX {adr_trx}"), &password_string);
                     }
                 }
 
@@ -523,7 +585,7 @@ async fn main() {
         lines.filter_map(Result::ok).collect::<Vec<String>>()
     };
 
-    let mut list_words = binding.iter().combinations(dlinn_a_pasvord);
+    let list_words = binding.iter().combinations(dlinn_a_pasvord);
 
     //--ГЛАВНЫЙ ЦИКЛ
     // слушаем ответы потоков и если есть шлём новую задачу
@@ -560,7 +622,6 @@ async fn main() {
             } else {
                 "No combinations available".to_string()
             };
-
 
 
             if show_info {
@@ -857,6 +918,7 @@ pub fn get_len_find_create(coin: &str) -> usize {
                 "btc.txt" => { include_str!("btc.txt") }
                 "dogecoin.txt" => { include_str!("dogecoin.txt") }
                 "eth.txt" => { include_str!("eth.txt") }
+                "trx.txt" => { include_str!("trx.txt") }
                 "list.txt" => { include_str!("bip39_words.txt") }
                 _ => { include_str!("btc.txt") }
             };
