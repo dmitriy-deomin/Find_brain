@@ -6,6 +6,7 @@ use std::path::Path;
 use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 use base58::{FromBase58, ToBase58};
+use bech32::{segwit,hrp};
 use itertools::Itertools;
 use rand::{Rng, thread_rng};
 use rand::prelude::IteratorRandom;
@@ -51,7 +52,6 @@ async fn main() {
     println!("{}", blue("==================="));
     println!("{}{}", blue("FIND BRAIN v:"), magenta(version));
     println!("{}", blue("==================="));
-
 
     //Чтение настроек, и если их нет создадим
     //-----------------------------------------------------------------
@@ -108,25 +108,37 @@ async fn main() {
         //ищем в списке нужные делаем им харакири и ложим обрубки в файл
         let mut len_btc = 0;
         for (index, address) in get_bufer_file("btc.txt").lines().enumerate() {
-            let binding = match address.expect("REASON").from_base58() {
-                Ok(value) => value,
-                Err(_err) => {
-                    eprintln!("{}", red(format!("ОШИБКА ДЕКОДИРОВАНИЯ В base58 строка:{}", index + 1)));
-                    continue; // Пропускаем этот адрес и переходим к следующему
+
+            let address = address.expect("Ошибка стения адреса со строки");
+
+            //адреса с bc1...
+            let binding = if address.starts_with("bc1") {
+                bip84_to_h160(address)
+            } else {
+                //адреса 1.. 3...
+                match  address.from_base58() {
+                    Ok(value) => {
+                        let mut a: [u8; 20] = [0; 20];
+                        if value.len() >= 21 {
+                            a.copy_from_slice(&value.as_slice()[1..21]);
+                            a
+                        } else {
+                            eprintln!("{}", red(format!("ОШИБКА, АДРЕС НЕ ВАЛИДЕН строка: {}", index + 1)));
+                            continue; // Skip this address and move to the next
+                        }
+                    }
+                    Err(_) => {
+                        eprintln!("{}", red(format!("ОШИБКА ДЕКОДИРОВАНИЯ В base58 строка: {}", index + 1)));
+                        continue; // Skip this address and move to the next
+                    }
                 }
             };
 
-            let mut a: [u8; 20] = [0; 20];
 
-            if binding.len() >= 21 {
-                a.copy_from_slice(&binding.as_slice()[1..21]);
-                if let Err(e) = file.write_all(&a) {
-                    eprintln!("Не удалось записать в файл: {}", e);
-                } else {
-                    len_btc = len_btc + 1;
-                }
+            if let Err(e) = file.write_all(&binding) {
+                eprintln!("Не удалось записать в файл: {}", e);
             } else {
-                eprintln!("{}", red(format!("ОШИБКА,АДРЕСС НЕ ВАЛИДЕН строка:{}", index + 1)));
+                len_btc = len_btc + 1;
             }
         }
         println!("{}", blue(format!("конвертировано адресов в h160:{}/{}", green(len_btc_txt), green(len_btc))));
@@ -272,10 +284,13 @@ async fn main() {
     //-----------------------------------------------------------------------------------------------
     println!("{}", blue("--"));
 
+
+    //************************************************************************************************
     // запись BTC в базу
     let mut colichestvo_btc = 0;
     println!("{}", blue("ЗАПИСЬ BTC ДАННЫХ В БАЗУ.."));
     let mut database: HashSet<[u8; 20]> = HashSet::new();
+    let mut old_len_baza = database.len();
     let file = File::open("btc_h160.bin").expect("неудалось открыть файл");
     let mut reader = BufReader::new(file);
     loop {
@@ -289,7 +304,7 @@ async fn main() {
             _ => {}
         }
     }
-    println!("{}{}", blue("Данные BTC успешно загружены в базу:"), green(format!("{colichestvo_btc} шт")));
+    println!("{}{}", blue("Данные BTC успешно загружены в базу:"), green(format!("{}/{colichestvo_btc} шт", database.len()-old_len_baza)));
     println!("{}", blue("--"));
 
 
@@ -297,6 +312,7 @@ async fn main() {
     let mut colichestvo_trx = 0;
     println!("{}", blue("ЗАПИСЬ TRX ДАННЫХ В БАЗУ.."));
     let file = File::open("trx_h160.bin").expect("неудалось открыть файл");
+    old_len_baza = database.len();
     let mut reader = BufReader::new(file);
     loop {
         let mut array = [0u8; 20];
@@ -309,12 +325,13 @@ async fn main() {
             _ => {}
         }
     }
-    println!("{}{}", blue("Данные TRX успешно загружены в базу:"), green(format!("{colichestvo_trx} шт")));
+    println!("{}{}", blue("Данные TRX успешно загружены в базу:"), green(format!("{}/{colichestvo_trx} шт", database.len()-old_len_baza)));
     println!("{}", blue("--"));
 
 
     // запись DOGECOIN в базу
     let mut colichestvo_dogecoin = 0;
+    old_len_baza = database.len();
     println!("{}", blue("ЗАПИСЬ DOGECOIN ДАННЫХ В БАЗУ.."));
     let file = File::open("dogecoin_h160.bin").expect("неудалось открыть файл");
     let mut reader = BufReader::new(file);
@@ -329,11 +346,12 @@ async fn main() {
             _ => {}
         }
     }
-    println!("{}{}", blue("Данные DOGECOIN успешно загружены в базу:"), green(format!("{colichestvo_dogecoin} шт")));
+    println!("{}{}", blue("Данные DOGECOIN успешно загружены в базу:"), green(format!("{}/{colichestvo_dogecoin} шт", database.len()-old_len_baza)));
     println!("{}", blue("--"));
 
     //запись ETH в базу
     let mut colichestvo_eth = 0;
+    old_len_baza = database.len();
     println!("{}", blue("ЗАПИСЬ ETH ДАННЫХ В БАЗУ.."));
     let file = File::open("eth.bin").expect("неудалось открыть файл");
     let mut reader = BufReader::new(file);
@@ -348,17 +366,17 @@ async fn main() {
             _ => {}
         }
     }
-    println!("{}{}", blue("Данные ETH успешно загружены в базу:"), green(format!("{colichestvo_eth} шт")));
+    println!("{}{}", blue("Данные ETH успешно загружены в базу:"), green(format!("{}/{colichestvo_eth} шт", database.len()-old_len_baza)));
 
 
     //включим или выключим проверку BTC
-    find_btc = if colichestvo_btc+colichestvo_dogecoin > 0 { true } else { false };
+    find_btc = if colichestvo_btc + colichestvo_dogecoin > 0 { true } else { false };
 
     //включим или выключим проверку ETH
-    find_eth = if colichestvo_eth+colichestvo_trx > 0 { true } else { false };
+    find_eth = if colichestvo_eth + colichestvo_trx > 0 { true } else { false };
 
     println!("{}", blue("--"));
-    println!("{}{}", blue("ИТОГО ЗАГРУЖЕННО В БАЗУ:"), green(format!("{} шт", colichestvo_btc + colichestvo_eth+colichestvo_dogecoin)));
+    println!("{}{}", blue("ИТОГО ЗАГРУЖЕННО В БАЗУ:"), green(format!("{}/{} шт", database.len(), colichestvo_btc + colichestvo_eth + colichestvo_dogecoin + colichestvo_trx)));
     println!("{}", blue("--"));
 
 
@@ -445,7 +463,7 @@ async fn main() {
         let main_sender = main_sender.clone();
 
         #[cfg(windows)]
-            let ice_library = {
+        let ice_library = {
             let lib = IceLibrary::new();
             lib.init_secp256_lib();
             lib
@@ -453,7 +471,7 @@ async fn main() {
 
         //для всего остального
         #[cfg(not(windows))]
-            let secp = Secp256k1::new();
+        let secp = Secp256k1::new();
 
         thread::spawn(move || {
             loop {
@@ -467,13 +485,13 @@ async fn main() {
                 // Получаем публичный ключ для разных систем , адрюха не дружит с ice_library
                 //------------------------------------------------------------------------
                 #[cfg(windows)]
-                    let (pk_u, pk_c) = {
+                let (pk_u, pk_c) = {
                     let p = ice_library.privatekey_to_publickey(&h);
                     (p, ice_library.publickey_uncompres_to_compres(&p))
                 };
 
                 #[cfg(not(windows))]
-                    let (pk_u, pk_c) = {
+                let (pk_u, pk_c) = {
                     // Создаем секретный ключ из байт
                     let secret_key = SecretKey::from_slice(&h).expect("32 bytes, within curve order");
                     let public_key = PublicKey::from_secret_key(&secp, &secret_key);
@@ -489,8 +507,9 @@ async fn main() {
                     //проверка наличия в базе BTC compress
                     if database_cl.contains(&h160c) {
                         let address_btc = get_legacy(h160c, LEGACY_BTC);
+                        let address_btc_bip84 =segwit::encode(hrp::BC,segwit::VERSION_0,&h160c).unwrap();
                         let address_doge = get_legacy(h160c, LEGACY_DOGE);
-                        let address = format!("\nBTC compress:{}\nDOGECOIN compress:{}",address_btc,address_doge);
+                        let address = format!("\nBTC compress:{}\nBTC bip84:{}\nDOGECOIN compress:{}", address_btc,address_btc_bip84, address_doge);
                         let private_key_c = hex_to_wif_compressed(&h.to_vec());
                         print_and_save(hex::encode(&h), &private_key_c, address, &password_string);
                     }
@@ -502,7 +521,7 @@ async fn main() {
                     if database_cl.contains(&h160u) {
                         let address_btc = get_legacy(h160u, LEGACY_BTC);
                         let address_doge = get_legacy(h160u, LEGACY_DOGE);
-                        let address = format!("\nBTC uncompres:{}\nDOGECOIN uncompres:{}",address_btc,address_doge);
+                        let address = format!("\nBTC uncompres:{}\nDOGECOIN uncompres:{}", address_btc, address_doge);
                         let private_key_u = hex_to_wif_uncompressed(&h.to_vec());
                         print_and_save(hex::encode(&h), &private_key_u, address, &password_string);
                     }
@@ -513,7 +532,7 @@ async fn main() {
                     if database_cl.contains(&bip49_hash160) {
                         let address_btc = get_bip49_address(&bip49_hash160, BIP49_BTC);
                         let address_doge = get_bip49_address(&bip49_hash160, BIP49_DOGE);
-                        let address = format!("\nBTC bip49:{}\nDOGECOIN bip49:{}",address_btc,address_doge);
+                        let address = format!("\nBTC bip49:{}\nDOGECOIN bip49:{}", address_btc, address_doge);
                         let private_key_c = hex_to_wif_compressed(&h.to_vec());
                         print_and_save(hex::encode(&h), &private_key_c, address, &password_string);
                     }
@@ -638,7 +657,6 @@ async fn main() {
 
             // Отправляем новую в свободный канал
             channels[ch].send(combined_line).unwrap();
-
         } else {
             // следующая комбинация пароля если алфавит пустой будем по всем возможным перебирать
             let password_string: String = if alfabet_all {
@@ -689,7 +707,7 @@ async fn main() {
                 if i == 0 && current_combination[0] == charset_len - 1 {
                     //если включенно увеличение длинны увеличим иначе выйдем из цикла
                     if len_uvelichenie {
-                        println!("{}{}", blue(format!("ДЛИНА ПАРОЛЯ:{} ПЕРЕБРАТА", green(dlinn_a_pasvord))), magenta(format!(" за:{:?}", start.elapsed())));
+                        println!("{}{}", blue(format!("ДЛИНА ПАРОЛЯ:{}", green(dlinn_a_pasvord))), magenta(format!(" ПЕРЕБРАТА за:{:?}", start.elapsed())));
                         dlinn_a_pasvord = dlinn_a_pasvord + 1;
                         current_combination = vec![0; dlinn_a_pasvord];
                         println!("{}{:?}", blue("ТЕКУЩАЯ ДЛИНА ПАРОЛЯ:"), green(dlinn_a_pasvord));
@@ -972,4 +990,17 @@ fn get_rand_alfabet(alvabet: String, size_rand_alfabet: usize) -> String {
 
     // Создаем строку из выбранных символов
     selected_chars.into_iter().collect()
+}
+
+fn bip84_to_h160(address: String) -> [u8; 20] {
+    let (_hrp, _version, program) = segwit::decode(&address).expect("valid address");
+
+    if program.len() == 20 {
+        // Convert Vec<u8> to [u8; 20]
+        let mut h160 = [0u8; 20];
+        h160.copy_from_slice(&program);
+        h160
+    } else {
+        [0u8; 20]
+    }
 }

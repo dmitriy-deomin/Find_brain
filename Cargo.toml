@@ -1,6 +1,6 @@
 [package]
 name = "Find_brain"
-version = "0.7.4"
+version = "0.7.6"
 edition = "2021"
 
 [dependencies]
@@ -27,6 +27,9 @@ tiny-keccak = {version = "2.0.2", features = ['keccak']}
 
 #bip49
 ripemd="0.1.3"
+
+#bip84
+bech32 = "0.11.0"
 
 [target.'cfg(not(windows))'.dependencies]
 rust_secp256k1 = { version = "0.29.0", package = "secp256k1" }

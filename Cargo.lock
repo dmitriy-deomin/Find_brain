@@ -4,9 +4,10 @@ version = 3
 
 [[package]]
 name = "Find_brain"
-version = "0.7.4"
+version = "0.7.6"
 dependencies = [
  "base58 0.2.0",
+ "bech32",
  "console",
  "crypto-hash",
  "hex 0.4.3",
@@ -89,6 +90,12 @@ name = "base58"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6107fe1be6682a68940da878d9e9f5e90ca5745b3dec9fd1bb393c8777d4f581"
+
+[[package]]
+name = "bech32"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d965446196e3b7decd44aa7ee49e31d630118f90ef12f97900f262eb915c951d"
 
 [[package]]
 name = "bitflags"
