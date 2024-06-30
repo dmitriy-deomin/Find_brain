@@ -84,7 +84,7 @@ async fn main() {
     //---------------------------------------------------------------------
 
     //если укажут меньше или 0
-    let comb_perebor_left = if comb_perebor_left_ > 0 {
+    let comb_perebor_left = if comb_perebor_left_ >= 0 {
         comb_perebor_left_
     } else { 1 };
 
@@ -109,7 +109,7 @@ async fn main() {
         let mut len_btc = 0;
         for (index, address) in get_bufer_file("btc.txt").lines().enumerate() {
 
-            let address = address.expect("Ошибка стения адреса со строки");
+            let address = address.expect("Ошибка чтения адреса со строки");
 
             //адреса с bc1...
             let binding = if address.starts_with("bc1") {
@@ -123,12 +123,12 @@ async fn main() {
                             a.copy_from_slice(&value.as_slice()[1..21]);
                             a
                         } else {
-                            eprintln!("{}", red(format!("ОШИБКА, АДРЕС НЕ ВАЛИДЕН строка: {}", index + 1)));
+                            eprintln!("{}", red(format!("ОШИБКА, АДРЕС НЕ ВАЛИДЕН строка: {} {}", index + 1,address)));
                             continue; // Skip this address and move to the next
                         }
                     }
                     Err(_) => {
-                        eprintln!("{}", red(format!("ОШИБКА ДЕКОДИРОВАНИЯ В base58 строка: {}", index + 1)));
+                        eprintln!("{}", red(format!("ОШИБКА ДЕКОДИРОВАНИЯ В base58 строка: {} {}", index + 1,address)));
                         continue; // Skip this address and move to the next
                     }
                 }
@@ -509,7 +509,7 @@ async fn main() {
                         let address_btc = get_legacy(h160c, LEGACY_BTC);
                         let address_btc_bip84 =segwit::encode(hrp::BC,segwit::VERSION_0,&h160c).unwrap();
                         let address_doge = get_legacy(h160c, LEGACY_DOGE);
-                        let address = format!("\nBTC compress:{}\nBTC bip84:{}\nDOGECOIN compress:{}", address_btc,address_btc_bip84, address_doge);
+                        let address = format!("\n-BTC compress:{}\nBTC bip84:{}\n-DOGECOIN compress:{}", address_btc,address_btc_bip84, address_doge);
                         let private_key_c = hex_to_wif_compressed(&h.to_vec());
                         print_and_save(hex::encode(&h), &private_key_c, address, &password_string);
                     }
@@ -521,7 +521,7 @@ async fn main() {
                     if database_cl.contains(&h160u) {
                         let address_btc = get_legacy(h160u, LEGACY_BTC);
                         let address_doge = get_legacy(h160u, LEGACY_DOGE);
-                        let address = format!("\nBTC uncompres:{}\nDOGECOIN uncompres:{}", address_btc, address_doge);
+                        let address = format!("\n-BTC uncompres:{}\n-DOGECOIN uncompres:{}", address_btc, address_doge);
                         let private_key_u = hex_to_wif_uncompressed(&h.to_vec());
                         print_and_save(hex::encode(&h), &private_key_u, address, &password_string);
                     }
@@ -532,7 +532,7 @@ async fn main() {
                     if database_cl.contains(&bip49_hash160) {
                         let address_btc = get_bip49_address(&bip49_hash160, BIP49_BTC);
                         let address_doge = get_bip49_address(&bip49_hash160, BIP49_DOGE);
-                        let address = format!("\nBTC bip49:{}\nDOGECOIN bip49:{}", address_btc, address_doge);
+                        let address = format!("\n-BTC bip49:{}\n-DOGECOIN bip49:{}", address_btc, address_doge);
                         let private_key_c = hex_to_wif_compressed(&h.to_vec());
                         print_and_save(hex::encode(&h), &private_key_c, address, &password_string);
                     }
@@ -543,7 +543,7 @@ async fn main() {
                     if database_cl.contains(&get_eth_kessak_from_public_key(pk_u)) {
                         let adr_eth = hex::encode(get_eth_kessak_from_public_key(pk_u));
                         let adr_trx = get_trx_from_eth(adr_eth.clone());
-                        print_and_save_eth(hex::encode(&h), format!("\nETH 0x{adr_eth}\nTRX {adr_trx}"), &password_string);
+                        print_and_save_eth(hex::encode(&h), format!("\n-ETH 0x{adr_eth}\n-TRX {adr_trx}"), &password_string);
                     }
                 }
 
@@ -576,6 +576,7 @@ async fn main() {
 
     //состовляем начальную позицию
     let mut current_combination = vec![0; dlinn_a_pasvord];
+
     //заполняем страртовыми значениями
     for d in comb_perebor_left..dlinn_a_pasvord {
         let position = match start_perebor.chars().nth(d) {
@@ -812,9 +813,9 @@ fn print_and_save(hex: String, key: &String, addres: String, password_string: &S
     println!("{}{}", cyan("HEX:"), cyan(hex.clone()));
     println!("{}{}", cyan("PRIVATE KEY:"), cyan(key));
     println!("{}{}", cyan("ADDRESS:"), cyan(addres.clone()));
-    let s = format!("ПАРОЛЬ:{}\nHEX:{}\nPRIVATE KEY: {}\nADDRESS {}\n", password_string, hex, key, addres);
+    let s = format!("ПАРОЛЬ:{}\nHEX:{}\nPRIVATE KEY: {}\nADDRESS {}\n\n", password_string, hex, key, addres);
     add_v_file("FOUND.txt", s);
-    println!("{}", cyan("SAVE TO FOUND.txt"));
+    println!("{}", cyan("СОХРАНЕНО В FOUND.txt"));
     println!("{}", cyan("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"));
 }
 
@@ -823,9 +824,9 @@ fn print_and_save_eth(hex: String, addres: String, password_string: &String) {
     println!("{}{}", cyan("ПАРОЛЬ:"), cyan(password_string));
     println!("{}{}", cyan("HEX:"), cyan(hex.clone()));
     println!("{}{}", cyan("ADDRESS:"), cyan(addres.clone()));
-    let s = format!("ПАРОЛЬ:{}\nHEX:{}\nADDRESS {}\n", password_string, hex, addres);
+    let s = format!("ПАРОЛЬ:{}\nHEX:{}\nADDRESS {}\n\n", password_string, hex, addres);
     add_v_file("FOUND.txt", s);
-    println!("{}", cyan("SAVE TO FOUND.txt"));
+    println!("{}", cyan("СОХРАНЕНО В FOUND.txt"));
     println!("{}", cyan("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"));
 }
 
