@@ -81,6 +81,7 @@ async fn main() {
     let show_info = string_to_bool(first_word(&conf[9].to_string()).to_string());
     let rand_alfabet = string_to_bool(first_word(&conf[10].to_string()).to_string());
     let size_rand_alfabet = first_word(&conf[11].to_string()).to_string().parse::<usize>().unwrap();
+    let time_save_tekushego_bodbora = first_word(&conf[12].to_string()).to_string().parse::<u32>().unwrap();
     //---------------------------------------------------------------------
 
     //если укажут меньше или 0
@@ -431,7 +432,13 @@ async fn main() {
         "S"
     } else { "" };
 
-    println!("{}{}", blue("ОТОБРАЖЕНИЕ СКОРОСТИ И ТЕКУЩЕГО ПОДБОРА:"), green(show_info.clone()));
+    if show_info{
+        println!("{}{}", blue("ОТОБРАЖЕНИЕ СКОРОСТИ И ТЕКУЩЕГО ПОДБОРА:"), green("ВКЛЮЧЕННО"));
+    }else {
+        println!("{}{}", blue("ОТОБРАЖЕНИЕ СКОРОСТИ И ТЕКУЩЕГО ПОДБОРА:"), green("ОТКЛЮЧЕННО"));
+        println!("{}{}", blue("-ВРЕМЯ АВТОСОХРАНЕНИЯ ТЕКУЩЕГО ПОДБОРА:"), green(time_save_tekushego_bodbora.clone()));
+    }
+
     println!("{}", blue("************************************"));
     //|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
 
@@ -659,6 +666,7 @@ async fn main() {
             // Отправляем новую в свободный канал
             channels[ch].send(combined_line).unwrap();
         } else {
+
             // следующая комбинация пароля если алфавит пустой будем по всем возможным перебирать
             let password_string: String = if alfabet_all {
                 current_combination.iter().map(|&c| char::from_u32(c as u32).unwrap_or(' ')).collect()
@@ -668,9 +676,10 @@ async fn main() {
                 )
             };
 
+
+            speed = speed + 1;
             if show_info {
                 //измеряем скорость и шлём прогресс
-                speed = speed + 1;
                 if start.elapsed() >= one_sek {
                     let mut stdout = stdout();
                     print!("{}\r{}", BACKSPACE, green(format!("SPEED:{speed}/s|{}", (format!("{}{}", prefix, password_string)))));
@@ -678,7 +687,16 @@ async fn main() {
                     start = Instant::now();
                     speed = 0;
                 }
+            }else {
+                // или через некоторое время будем сохранять в файл текущий подбор
+                if speed> time_save_tekushego_bodbora {
+                    let podbor = if minikey{format!("S{password_string}")}else { password_string.clone() };
+                    println!("{}{}", blue("ТЕКУЩИЙ ПОДБОР:"), green(podbor.clone()));
+                    add_v_file("ТЕКУЩИЙ ПОДБОР.txt",format!("{}\n",podbor));
+                    speed = 0;
+                }
             }
+
 
             // Отправляем новую в свободный канал
             channels[ch].send(password_string).unwrap();
