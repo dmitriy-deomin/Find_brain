@@ -10,6 +10,7 @@ use bech32::{segwit, hrp};
 use bincode::{deserialize_from, serialize_into};
 use rand::{Rng, thread_rng};
 use rand::seq::SliceRandom;
+use rayon::iter::IntoParallelRefIterator;
 use ripemd::{Ripemd160, Digest as Ripemd160Digest};
 
 use crate::color::{blue, cyan, green, magenta, red};
@@ -17,6 +18,8 @@ use rustils::parse::boolean::string_to_bool;
 use sha2::{Sha256, Digest};
 use sv::util::hash160;
 use tiny_keccak::{Hasher, Keccak};
+
+use rayon::prelude::*;
 
 #[cfg(not(windows))]
 use rust_secp256k1::{PublicKey, Secp256k1, SecretKey};
@@ -97,8 +100,8 @@ async fn main() {
         println!("{}", blue("--"));
         println!("{}", green("файл database.bin уже существует,конвертирование пропущено"));
         println!("{}", green("ЗАГРУЗКА БАЗЫ ИЗ database.bin"));
-        // Загрузим HashSet из файла
-        database = match load_from_file("database.bin") {
+        // Загрузим HashSet из файла load_from_file-однопоточно
+        database = match load_from_file_fast("database.bin") {
             Ok(loaded_set) => {
                 println!("{}", green(format!("ГОТОВО, В БАЗЕ:{} АДРЕСОВ", loaded_set.len())));
                 loaded_set
@@ -108,6 +111,7 @@ async fn main() {
                 return;
             }
         };
+
         println!("{}", blue("--"));
     } else {
         println!("{}", blue("--"));
@@ -1099,4 +1103,31 @@ fn load_from_file(file_path: &str) -> Result<HashSet<[u8; 20]>, Box<dyn std::err
         }
         Err(e) => Err(Box::new(e)),
     }
+}
+
+
+
+//загрузка базы с помощью многопоточности
+fn load_from_file_fast(path: &str) -> io::Result<HashSet<[u8; 20]>> {
+    let file = File::open(path)?;
+    let mut reader = BufReader::new(file);
+    let mut buffer = Vec::new();
+    reader.read_to_end(&mut buffer)?;
+
+    // Разделите буфер на части и обработайте их параллельно
+    let chunks: Vec<_> = buffer.chunks(20).collect();
+    let set: HashSet<[u8; 20]> = chunks
+        .par_iter()
+        .filter_map(|chunk| {
+            if chunk.len() == 20 {
+                let mut arr = [0; 20];
+                arr.copy_from_slice(chunk);
+                Some(arr)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    Ok(set)
 }
