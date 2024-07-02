@@ -6,10 +6,9 @@ use std::path::Path;
 use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 use base58::{FromBase58, ToBase58};
-use bech32::{segwit,hrp};
-use itertools::Itertools;
+use bech32::{segwit, hrp};
+use bincode::{deserialize_from, serialize_into};
 use rand::{Rng, thread_rng};
-use rand::prelude::IteratorRandom;
 use rand::seq::SliceRandom;
 use ripemd::{Ripemd160, Digest as Ripemd160Digest};
 
@@ -71,7 +70,7 @@ async fn main() {
 
     let cpu_core: usize = first_word(&conf[0].to_string()).to_string().parse::<usize>().unwrap();
     let mut dlinn_a_pasvord: usize = first_word(&conf[1].to_string()).to_string().parse::<usize>().unwrap();
-    let alvabet = first_word(&conf[2].to_string()).to_string();
+    let mut alvabet = first_word(&conf[2].to_string()).to_string();
     let len_uvelichenie = string_to_bool(first_word(&conf[3].to_string()).to_string());
     let probel = string_to_bool(first_word(&conf[4].to_string()).to_string());
     let start_perebor = first_word(&conf[5].to_string()).to_string();
@@ -89,366 +88,393 @@ async fn main() {
         comb_perebor_left_
     } else { 1 };
 
-    //если какойто бызы небудет небум искать в ней
-    let find_eth;
-    let find_btc;
+    //база со всеми адресами
+    let mut database: HashSet<[u8; 20]> = HashSet::new();
 
-    println!("{}", blue("--"));
-    //провереряем если файл с хешами BTC
-    //--------------------------------------------------------------------------------------------
-    if fs::metadata(Path::new("btc_h160.bin")).is_ok() {
-        println!("{}", green("файл btc_h160.bin уже существует,конвертирование пропущено"));
+
+    //проверим есть ли общая база
+    if fs::metadata(Path::new("database.bin")).is_ok() {
+        println!("{}", blue("--"));
+        println!("{}", green("файл database.bin уже существует,конвертирование пропущено"));
+        println!("{}", green("ЗАГРУЗКА БАЗЫ ИЗ database.bin"));
+        // Загрузим HashSet из файла
+        database = match load_from_file("database.bin") {
+            Ok(loaded_set) => {
+                println!("{}", green(format!("ГОТОВО, В БАЗЕ:{} АДРЕСОВ", loaded_set.len())));
+                loaded_set
+            }
+            Err(e) => {
+                eprintln!("{}", red(format!("ОШИБКА: {}", e)));
+                return;
+            }
+        };
+        println!("{}", blue("--"));
     } else {
-        //проверяем есть ли файл(создаём) и считаем сколько строк
-        let len_btc_txt = get_len_find_create("btc.txt");
+        println!("{}", blue("--"));
+        //провереряем если файл с хешами BTC
+        //--------------------------------------------------------------------------------------------
+        if fs::metadata(Path::new("btc_h160.bin")).is_ok() {
+            println!("{}", green("файл btc_h160.bin уже существует,конвертирование пропущено"));
+        } else {
+            //проверяем есть ли файл(создаём) и считаем сколько строк
+            let len_btc_txt = get_len_find_create("btc.txt");
 
-        println!("{}", blue("конвертирование адресов в h160 и сохранение в btc_h160.bin"));
-        //конвертируем в h160 и записываем в файл рядом
-        //создаём файл
-        let mut file = File::create("btc_h160.bin").unwrap();
-        //ищем в списке нужные делаем им харакири и ложим обрубки в файл
-        let mut len_btc = 0;
-        for (index, address) in get_bufer_file("btc.txt").lines().enumerate() {
+            println!("{}", blue("конвертирование адресов в h160 и сохранение в btc_h160.bin"));
+            //конвертируем в h160 и записываем в файл рядом
+            //создаём файл
+            let mut file = File::create("btc_h160.bin").unwrap();
+            //ищем в списке нужные делаем им харакири и ложим обрубки в файл
+            let mut len_btc = 0;
+            for (index, address) in get_bufer_file("btc.txt").lines().enumerate() {
+                let address = address.expect("Ошибка чтения адреса со строки");
 
-            let address = address.expect("Ошибка чтения адреса со строки");
-
-            //адреса с bc1...
-            let binding = if address.starts_with("bc1") {
-                bip84_to_h160(address)
-            } else {
-                //адреса 1.. 3...
-                match  address.from_base58() {
-                    Ok(value) => {
-                        let mut a: [u8; 20] = [0; 20];
-                        if value.len() >= 21 {
-                            a.copy_from_slice(&value.as_slice()[1..21]);
-                            a
-                        } else {
-                            eprintln!("{}", red(format!("ОШИБКА, АДРЕС НЕ ВАЛИДЕН строка: {} {}", index + 1,address)));
+                //адреса с bc1...
+                let binding = if address.starts_with("bc1") {
+                    bip84_to_h160(address)
+                } else {
+                    //адреса 1.. 3...
+                    match address.from_base58() {
+                        Ok(value) => {
+                            let mut a: [u8; 20] = [0; 20];
+                            if value.len() >= 21 {
+                                a.copy_from_slice(&value.as_slice()[1..21]);
+                                a
+                            } else {
+                                eprintln!("{}", red(format!("ОШИБКА, АДРЕС НЕ ВАЛИДЕН строка: {} {}", index + 1, address)));
+                                continue; // Skip this address and move to the next
+                            }
+                        }
+                        Err(_) => {
+                            eprintln!("{}", red(format!("ОШИБКА ДЕКОДИРОВАНИЯ В base58 строка: {} {}", index + 1, address)));
                             continue; // Skip this address and move to the next
                         }
                     }
-                    Err(_) => {
-                        eprintln!("{}", red(format!("ОШИБКА ДЕКОДИРОВАНИЯ В base58 строка: {} {}", index + 1,address)));
-                        continue; // Skip this address and move to the next
-                    }
-                }
-            };
+                };
 
 
-            if let Err(e) = file.write_all(&binding) {
-                eprintln!("Не удалось записать в файл: {}", e);
-            } else {
-                len_btc = len_btc + 1;
-            }
-        }
-        println!("{}", blue(format!("конвертировано адресов в h160:{}/{}", green(len_btc_txt), green(len_btc))));
-    }
-    //-----------------------------------------------------------------------------------------------
-
-    println!("{}", blue("--"));
-
-    //провереряем если файл с хешами DOGECOIN
-    //--------------------------------------------------------------------------------------------
-    if fs::metadata(Path::new("dogecoin_h160.bin")).is_ok() {
-        println!("{}", green("файл dogecoin_h160.bin уже существует,конвертирование пропущено"));
-    } else {
-        //проверяем есть ли файл(создаём) и считаем сколько строк
-        let len_btc_txt = get_len_find_create("dogecoin.txt");
-
-        println!("{}", blue("конвертирование адресов в h160 и сохранение в dogecoin_h160.bin"));
-        //конвертируем в h160 и записываем в файл рядом
-        //создаём файл
-        let mut file = File::create("dogecoin_h160.bin").unwrap();
-        //ищем в списке нужные делаем им харакири и ложим обрубки в файл
-        let mut len_btc = 0;
-        for (index, address) in get_bufer_file("dogecoin.txt").lines().enumerate() {
-            let binding = match address.expect("REASON").from_base58() {
-                Ok(value) => value,
-                Err(_err) => {
-                    eprintln!("{}", red(format!("ОШИБКА ДЕКОДИРОВАНИЯ В base58 строка:{}", index + 1)));
-                    continue; // Пропускаем этот адрес и переходим к следующему
-                }
-            };
-
-            let mut a: [u8; 20] = [0; 20];
-
-            if binding.len() >= 21 {
-                a.copy_from_slice(&binding.as_slice()[1..21]);
-                if let Err(e) = file.write_all(&a) {
+                if let Err(e) = file.write_all(&binding) {
                     eprintln!("Не удалось записать в файл: {}", e);
                 } else {
                     len_btc = len_btc + 1;
                 }
-            } else {
-                eprintln!("{}", red(format!("ОШИБКА,АДРЕСС НЕ ВАЛИДЕН строка:{}", index + 1)));
             }
+            println!("{}", blue(format!("конвертировано адресов в h160:{}/{}", green(len_btc_txt), green(len_btc))));
         }
-        println!("{}", blue(format!("конвертировано адресов в h160:{}/{}", green(len_btc_txt), green(len_btc))));
-    }
-    //-----------------------------------------------------------------------------------------------
+        //-----------------------------------------------------------------------------------------------
 
-    println!("{}", blue("--"));
+        println!("{}", blue("--"));
 
-    //провереряем если файл с хешами ETH
-    //--------------------------------------------------------------------------------------------
-    if fs::metadata(Path::new("eth.bin")).is_ok() {
-        println!("{}", green("файл eth.bin уже существует,конвертирование пропущено"));
-    } else {
-        //проверяем есть ли файл(создаём) и считаем сколько строк
-        let len_eth_txt = get_len_find_create("eth.txt");
+        //провереряем если файл с хешами DOGECOIN
+        //--------------------------------------------------------------------------------------------
+        if fs::metadata(Path::new("dogecoin_h160.bin")).is_ok() {
+            println!("{}", green("файл dogecoin_h160.bin уже существует,конвертирование пропущено"));
+        } else {
+            //проверяем есть ли файл(создаём) и считаем сколько строк
+            let len_btc_txt = get_len_find_create("dogecoin.txt");
 
-        println!("{}", blue("конвертирование адресов и сохранение в eth.bin"));
-
-        let file = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .open("eth.bin")
-            .unwrap();
-        let mut writer = BufWriter::new(file);
-
-        let mut len_eth = 0;
-        let mut invalid_addresses = Vec::new();
-
-        for (index, line) in get_bufer_file("eth.txt").lines().enumerate() {
-            match line {
-                Ok(address) => match eth_address_to_bytes(&address) {
-                    Ok(bytes) => {
-                        if let Err(e) = writer.write_all(&bytes) {
-                            eprintln!("Не удалось записать в файл: {}", e);
-                        } else {
-                            len_eth += 1;
-                        }
+            println!("{}", blue("конвертирование адресов в h160 и сохранение в dogecoin_h160.bin"));
+            //конвертируем в h160 и записываем в файл рядом
+            //создаём файл
+            let mut file = File::create("dogecoin_h160.bin").unwrap();
+            //ищем в списке нужные делаем им харакири и ложим обрубки в файл
+            let mut len_btc = 0;
+            for (index, address) in get_bufer_file("dogecoin.txt").lines().enumerate() {
+                let binding = match address.expect("REASON").from_base58() {
+                    Ok(value) => value,
+                    Err(_err) => {
+                        eprintln!("{}", red(format!("ОШИБКА ДЕКОДИРОВАНИЯ В base58 строка:{}", index + 1)));
+                        continue; // Пропускаем этот адрес и переходим к следующему
                     }
-                    Err(e) => {
-                        invalid_addresses.push((index, address, e));
+                };
+
+                let mut a: [u8; 20] = [0; 20];
+
+                if binding.len() >= 21 {
+                    a.copy_from_slice(&binding.as_slice()[1..21]);
+                    if let Err(e) = file.write_all(&a) {
+                        eprintln!("Не удалось записать в файл: {}", e);
+                    } else {
+                        len_btc = len_btc + 1;
                     }
-                },
-                Err(e) => {
-                    invalid_addresses.push((index, "".to_string(), e.to_string()));
-                }
-            }
-        }
-
-        println!("{}", blue(format!("конвертировано адресов:{}/{}", green(len_eth_txt), green(len_eth))));
-
-        if !invalid_addresses.is_empty() {
-            println!("Invalid addresses:");
-            for (index, address, error) in invalid_addresses {
-                println!("Line {}: {} ({})", index + 1, address, error);
-            }
-        }
-    }
-    //-----------------------------------------------------------------------------------------------
-
-    //провереряем если файл с хешами TRX
-    println!("{}", blue("--"));
-    //провереряем если файл с хешами BTC
-    //--------------------------------------------------------------------------------------------
-    if fs::metadata(Path::new("trx_h160.bin")).is_ok() {
-        println!("{}", green("файл trx_h160.bin уже существует,конвертирование пропущено"));
-    } else {
-        //проверяем есть ли файл(создаём) и считаем сколько строк
-        let len_trx_txt = get_len_find_create("trx.txt");
-
-        println!("{}", blue("конвертирование адресов в h160 и сохранение в trx_h160.bin"));
-        //конвертируем в h160 и записываем в файл рядом
-        //создаём файл
-        let mut file = File::create("trx_h160.bin").unwrap();
-        //ищем в списке нужные делаем им харакири и ложим обрубки в файл
-        let mut len_trx = 0;
-        for (index, address) in get_bufer_file("trx.txt").lines().enumerate() {
-            let binding = match address.expect("REASON").from_base58() {
-                Ok(value) => value,
-                Err(_err) => {
-                    eprintln!("{}", red(format!("ОШИБКА ДЕКОДИРОВАНИЯ В base58 строка:{}", index + 1)));
-                    continue; // Пропускаем этот адрес и переходим к следующему
-                }
-            };
-
-            let mut a: [u8; 20] = [0; 20];
-
-            if binding.len() >= 21 {
-                a.copy_from_slice(&binding.as_slice()[1..21]);
-                if let Err(e) = file.write_all(&a) {
-                    eprintln!("Не удалось записать в файл: {}", e);
                 } else {
-                    len_trx = len_trx + 1;
+                    eprintln!("{}", red(format!("ОШИБКА,АДРЕСС НЕ ВАЛИДЕН строка:{}", index + 1)));
                 }
-            } else {
-                eprintln!("{}", red(format!("ОШИБКА,АДРЕСС НЕ ВАЛИДЕН строка:{}", index + 1)));
+            }
+            println!("{}", blue(format!("конвертировано адресов в h160:{}/{}", green(len_btc_txt), green(len_btc))));
+        }
+        //-----------------------------------------------------------------------------------------------
+
+        println!("{}", blue("--"));
+
+        //провереряем если файл с хешами ETH
+        //--------------------------------------------------------------------------------------------
+        if fs::metadata(Path::new("eth.bin")).is_ok() {
+            println!("{}", green("файл eth.bin уже существует,конвертирование пропущено"));
+        } else {
+            //проверяем есть ли файл(создаём) и считаем сколько строк
+            let len_eth_txt = get_len_find_create("eth.txt");
+
+            println!("{}", blue("конвертирование адресов и сохранение в eth.bin"));
+
+            let file = OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(true)
+                .open("eth.bin")
+                .unwrap();
+            let mut writer = BufWriter::new(file);
+
+            let mut len_eth = 0;
+            let mut invalid_addresses = Vec::new();
+
+            for (index, line) in get_bufer_file("eth.txt").lines().enumerate() {
+                match line {
+                    Ok(address) => match eth_address_to_bytes(&address) {
+                        Ok(bytes) => {
+                            if let Err(e) = writer.write_all(&bytes) {
+                                eprintln!("Не удалось записать в файл: {}", e);
+                            } else {
+                                len_eth += 1;
+                            }
+                        }
+                        Err(e) => {
+                            invalid_addresses.push((index, address, e));
+                        }
+                    },
+                    Err(e) => {
+                        invalid_addresses.push((index, "".to_string(), e.to_string()));
+                    }
+                }
+            }
+
+            println!("{}", blue(format!("конвертировано адресов:{}/{}", green(len_eth_txt), green(len_eth))));
+
+            if !invalid_addresses.is_empty() {
+                println!("Invalid addresses:");
+                for (index, address, error) in invalid_addresses {
+                    println!("Line {}: {} ({})", index + 1, address, error);
+                }
             }
         }
-        println!("{}", blue(format!("конвертировано адресов в h160:{}/{}", green(len_trx_txt), green(len_trx))));
-    }
-    //-----------------------------------------------------------------------------------------------
-    println!("{}", blue("--"));
+        //-----------------------------------------------------------------------------------------------
 
+        //провереряем если файл с хешами TRX
+        println!("{}", blue("--"));
+        //провереряем если файл с хешами BTC
+        //--------------------------------------------------------------------------------------------
+        if fs::metadata(Path::new("trx_h160.bin")).is_ok() {
+            println!("{}", green("файл trx_h160.bin уже существует,конвертирование пропущено"));
+        } else {
+            //проверяем есть ли файл(создаём) и считаем сколько строк
+            let len_trx_txt = get_len_find_create("trx.txt");
 
-    //************************************************************************************************
-    // запись BTC в базу
-    let mut colichestvo_btc = 0;
-    println!("{}", blue("ЗАПИСЬ BTC ДАННЫХ В БАЗУ.."));
-    let mut database: HashSet<[u8; 20]> = HashSet::new();
-    let mut old_len_baza = database.len();
-    let file = File::open("btc_h160.bin").expect("неудалось открыть файл");
-    let mut reader = BufReader::new(file);
-    loop {
-        let mut array = [0u8; 20];
-        match reader.read_exact(&mut array) {
-            Ok(_) => {
-                colichestvo_btc = colichestvo_btc + 1;
-                database.insert(array);
+            println!("{}", blue("конвертирование адресов в h160 и сохранение в trx_h160.bin"));
+            //конвертируем в h160 и записываем в файл рядом
+            //создаём файл
+            let mut file = File::create("trx_h160.bin").unwrap();
+            //ищем в списке нужные делаем им харакири и ложим обрубки в файл
+            let mut len_trx = 0;
+            for (index, address) in get_bufer_file("trx.txt").lines().enumerate() {
+                let binding = match address.expect("REASON").from_base58() {
+                    Ok(value) => value,
+                    Err(_err) => {
+                        eprintln!("{}", red(format!("ОШИБКА ДЕКОДИРОВАНИЯ В base58 строка:{}", index + 1)));
+                        continue; // Пропускаем этот адрес и переходим к следующему
+                    }
+                };
+
+                let mut a: [u8; 20] = [0; 20];
+
+                if binding.len() >= 21 {
+                    a.copy_from_slice(&binding.as_slice()[1..21]);
+                    if let Err(e) = file.write_all(&a) {
+                        eprintln!("Не удалось записать в файл: {}", e);
+                    } else {
+                        len_trx = len_trx + 1;
+                    }
+                } else {
+                    eprintln!("{}", red(format!("ОШИБКА,АДРЕСС НЕ ВАЛИДЕН строка:{}", index + 1)));
+                }
             }
-            Err(ref e) if e.kind() == io::ErrorKind::UnexpectedEof => break,
-            _ => {}
+            println!("{}", blue(format!("конвертировано адресов в h160:{}/{}", green(len_trx_txt), green(len_trx))));
         }
-    }
-    println!("{}{}", blue("Данные BTC успешно загружены в базу:"), green(format!("{}/{colichestvo_btc} шт", database.len()-old_len_baza)));
-    println!("{}", blue("--"));
+        //-----------------------------------------------------------------------------------------------
+        println!("{}", blue("--"));
 
 
-    // запись TRX в базу
-    let mut colichestvo_trx = 0;
-    println!("{}", blue("ЗАПИСЬ TRX ДАННЫХ В БАЗУ.."));
-    let file = File::open("trx_h160.bin").expect("неудалось открыть файл");
-    old_len_baza = database.len();
-    let mut reader = BufReader::new(file);
-    loop {
-        let mut array = [0u8; 20];
-        match reader.read_exact(&mut array) {
-            Ok(_) => {
-                colichestvo_trx = colichestvo_trx + 1;
-                database.insert(array);
+        //************************************************************************************************
+        // запись BTC в базу
+        let mut colichestvo_btc = 0;
+        println!("{}", blue("ЗАПИСЬ BTC ДАННЫХ В БАЗУ.."));
+        let mut old_len_baza = database.len();
+        let file = File::open("btc_h160.bin").expect("неудалось открыть файл");
+        let mut reader = BufReader::new(file);
+        loop {
+            let mut array = [0u8; 20];
+            match reader.read_exact(&mut array) {
+                Ok(_) => {
+                    colichestvo_btc = colichestvo_btc + 1;
+                    database.insert(array);
+                }
+                Err(ref e) if e.kind() == io::ErrorKind::UnexpectedEof => break,
+                _ => {}
             }
-            Err(ref e) if e.kind() == io::ErrorKind::UnexpectedEof => break,
-            _ => {}
         }
-    }
-    println!("{}{}", blue("Данные TRX успешно загружены в базу:"), green(format!("{}/{colichestvo_trx} шт", database.len()-old_len_baza)));
-    println!("{}", blue("--"));
+        println!("{}{}", blue("Данные BTC успешно загружены в базу:"), green(format!("{}/{colichestvo_btc} шт", database.len() - old_len_baza)));
+        println!("{}", blue("--"));
 
 
-    // запись DOGECOIN в базу
-    let mut colichestvo_dogecoin = 0;
-    old_len_baza = database.len();
-    println!("{}", blue("ЗАПИСЬ DOGECOIN ДАННЫХ В БАЗУ.."));
-    let file = File::open("dogecoin_h160.bin").expect("неудалось открыть файл");
-    let mut reader = BufReader::new(file);
-    loop {
-        let mut array = [0u8; 20];
-        match reader.read_exact(&mut array) {
-            Ok(_) => {
-                colichestvo_dogecoin = colichestvo_dogecoin + 1;
-                database.insert(array);
+        // запись TRX в базу
+        let mut colichestvo_trx = 0;
+        println!("{}", blue("ЗАПИСЬ TRX ДАННЫХ В БАЗУ.."));
+        let file = File::open("trx_h160.bin").expect("неудалось открыть файл");
+        old_len_baza = database.len();
+        let mut reader = BufReader::new(file);
+        loop {
+            let mut array = [0u8; 20];
+            match reader.read_exact(&mut array) {
+                Ok(_) => {
+                    colichestvo_trx = colichestvo_trx + 1;
+                    database.insert(array);
+                }
+                Err(ref e) if e.kind() == io::ErrorKind::UnexpectedEof => break,
+                _ => {}
             }
-            Err(ref e) if e.kind() == io::ErrorKind::UnexpectedEof => break,
-            _ => {}
         }
-    }
-    println!("{}{}", blue("Данные DOGECOIN успешно загружены в базу:"), green(format!("{}/{colichestvo_dogecoin} шт", database.len()-old_len_baza)));
-    println!("{}", blue("--"));
+        println!("{}{}", blue("Данные TRX успешно загружены в базу:"), green(format!("{}/{colichestvo_trx} шт", database.len() - old_len_baza)));
+        println!("{}", blue("--"));
 
-    //запись ETH в базу
-    let mut colichestvo_eth = 0;
-    old_len_baza = database.len();
-    println!("{}", blue("ЗАПИСЬ ETH ДАННЫХ В БАЗУ.."));
-    let file = File::open("eth.bin").expect("неудалось открыть файл");
-    let mut reader = BufReader::new(file);
-    loop {
-        let mut array = [0u8; 20];
-        match reader.read_exact(&mut array) {
-            Ok(_) => {
-                colichestvo_eth = colichestvo_eth + 1;
-                database.insert(array);
+
+        // запись DOGECOIN в базу
+        let mut colichestvo_dogecoin = 0;
+        old_len_baza = database.len();
+        println!("{}", blue("ЗАПИСЬ DOGECOIN ДАННЫХ В БАЗУ.."));
+        let file = File::open("dogecoin_h160.bin").expect("неудалось открыть файл");
+        let mut reader = BufReader::new(file);
+        loop {
+            let mut array = [0u8; 20];
+            match reader.read_exact(&mut array) {
+                Ok(_) => {
+                    colichestvo_dogecoin = colichestvo_dogecoin + 1;
+                    database.insert(array);
+                }
+                Err(ref e) if e.kind() == io::ErrorKind::UnexpectedEof => break,
+                _ => {}
             }
-            Err(ref e) if e.kind() == io::ErrorKind::UnexpectedEof => break,
-            _ => {}
         }
+        println!("{}{}", blue("Данные DOGECOIN успешно загружены в базу:"), green(format!("{}/{colichestvo_dogecoin} шт", database.len() - old_len_baza)));
+        println!("{}", blue("--"));
+
+        //запись ETH в базу
+        let mut colichestvo_eth = 0;
+        old_len_baza = database.len();
+        println!("{}", blue("ЗАПИСЬ ETH ДАННЫХ В БАЗУ.."));
+        let file = File::open("eth.bin").expect("неудалось открыть файл");
+        let mut reader = BufReader::new(file);
+        loop {
+            let mut array = [0u8; 20];
+            match reader.read_exact(&mut array) {
+                Ok(_) => {
+                    colichestvo_eth = colichestvo_eth + 1;
+                    database.insert(array);
+                }
+                Err(ref e) if e.kind() == io::ErrorKind::UnexpectedEof => break,
+                _ => {}
+            }
+        }
+        println!("{}{}", blue("Данные ETH успешно загружены в базу:"), green(format!("{}/{colichestvo_eth} шт", database.len() - old_len_baza)));
+
+        println!("{}", blue("--"));
+        println!("{}{}", blue("ИТОГО ЗАГРУЖЕННО В БАЗУ:"), green(format!("{}/{} шт", database.len(), colichestvo_btc + colichestvo_eth + colichestvo_dogecoin + colichestvo_trx)));
+        println!("{}", blue("--"));
+
+        // Сохраним HashSet в файл
+        println!("{}", blue("СОХРАНЕНИЕ ОБШЕЙ БАЗЫ В database.bin"));
+        match save_to_file(&database, "database.bin") {
+            Ok(_) => println!("{}", blue("ГОТОВО")),
+            Err(e) => eprintln!("{}", red(format!("ОШИБКА {}", e))),
+        }
+        println!("{}", blue("--"));
     }
-    println!("{}{}", blue("Данные ETH успешно загружены в базу:"), green(format!("{}/{colichestvo_eth} шт", database.len()-old_len_baza)));
 
-
-    //включим или выключим проверку BTC
-    find_btc = if colichestvo_btc + colichestvo_dogecoin > 0 { true } else { false };
-
-    //включим или выключим проверку ETH
-    find_eth = if colichestvo_eth + colichestvo_trx > 0 { true } else { false };
-
-    println!("{}", blue("--"));
-    println!("{}{}", blue("ИТОГО ЗАГРУЖЕННО В БАЗУ:"), green(format!("{}/{} шт", database.len(), colichestvo_btc + colichestvo_eth + colichestvo_dogecoin + colichestvo_trx)));
-    println!("{}", blue("--"));
+    //проверка есть ли в базе вообще чего
+    if database.len() == 0 {
+        println!("{}", red("БАЗА ПУСТА\nпоместите рядом с программой текстовые файлы со списком адресов:\nbtc.txt,eth.txt,trx.txt,dogecoin.txt"));
+        jdem_user_to_close_programm();
+        return;
+    }
 
 
     //ИНфо блок
     //||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
     println!("{}", blue("************************************"));
-    println!("{}{}", blue("ГЕНЕРАЦИЯ ETH АДРЕСОВ:"), green(format!("{}", find_eth)));
-    println!("{}{}", blue("ГЕНЕРАЦИЯ BTC АДРЕСОВ:"), green(format!("{}", find_btc)));
     println!("{}{}{}", blue("КОЛИЧЕСТВО ЯДЕР ПРОЦЕССОРА:"), green(cpu_core), blue(format!("/{count_cpu}")));
     println!("{}{}", blue("ДЛИНА ПАРОЛЯ:"), green(dlinn_a_pasvord));
 
     //алфавит
     //-------------------------------------------------------------------------
-    let alvabet = if rand_alfabet {
-        let rndalf = get_rand_alfabet(alvabet, size_rand_alfabet);
-        println!("{}{}", blue("СЛУЧАЙНЫЕ ИЗ АЛФАВИТА:"), green(rand_alfabet));
-        println!("{}{}", blue("-КОЛИЧЕСТВО СЛУЧАЙНЫХ ИЗ АЛФАВИТА:"), green(size_rand_alfabet));
-        println!("{}{}", blue("-АЛФАВИТ:"), green(&rndalf));
-        rndalf
+    let alfabet_ili_list;
+    //пустой список
+    let mut lines = vec!["первый".to_string()];
+    if alvabet == "list.txt" {
+        println!("{}", blue("ИСПОЛЬЗОВАНИЕ list.txt ВМЕСТО АЛФАВИТА"));
+        get_len_find_create(FILE_LIST);
+        let list = read_lines(FILE_LIST);
+        println!("{}", blue("-ОБРАБОТКА list.txt"));
+        // Преобразуем строки в вектор
+        lines = list.filter_map(Result::ok).collect::<Vec<String>>();
+        println!("{}", blue("-ГОТОВО"));
+        alfabet_ili_list = false;
     } else {
-        println!("{}{}", blue("СЛУЧАЙНЫЕ ИЗ АЛФАВИТА:"), green(rand_alfabet));
-        if alvabet == "0" {
-            println!("{}{}", blue("АЛФАВИТ:"), green("ВСЕ ВОЗМОЖНЫЕ"));
+        alfabet_ili_list = true;
+        alvabet = if rand_alfabet {
+            let rndalf = get_rand_alfabet(alvabet, size_rand_alfabet);
+            println!("{}{}", blue("СЛУЧАЙНЫЕ ИЗ АЛФАВИТА:"), green(rand_alfabet));
+            println!("{}{}", blue("-КОЛИЧЕСТВО СЛУЧАЙНЫХ ИЗ АЛФАВИТА:"), green(size_rand_alfabet));
+            println!("{}{}", blue("-АЛФАВИТ:"), green(&rndalf));
+            rndalf
         } else {
-            println!("{}{}", blue("АЛФАВИТ:"), green(&alvabet));
+            println!("{}{}", blue("СЛУЧАЙНЫЕ ИЗ АЛФАВИТА:"), green(rand_alfabet));
+            if alvabet == "0" {
+                println!("{}{}", blue("АЛФАВИТ:"), green("ВСЕ ВОЗМОЖНЫЕ"));
+            } else {
+                println!("{}{}", blue("АЛФАВИТ:"), green(&alvabet));
+            }
+            alvabet
+        };
+        println!("{}{}", blue("ДОБАВЛЕНИЕ ПРОБЕЛА:"), green(probel.clone()));
+        println!("{}{}", blue("ДОБАВЛЕНИЕ S В НАЧАЛЕ(для поиска миникей):"), green(minikey.clone()));
+        if minikey {
+            //если включен режим миникей то отнимем 1 из общей длинны для первой S
+            dlinn_a_pasvord = dlinn_a_pasvord - 1;
+        };
+        if mode == 0 {
+            println!("{}{}", blue("УВЕЛИЧЕНИЕ ДЛИННЫ ПАРОЛЯ:"), green(len_uvelichenie.clone()));
+            println!("{}{}", blue("НАЧАЛО ПЕРЕБОРА:"), green(start_perebor.clone()));
         }
-        alvabet
-    };
+        if mode == 2 {
+            println!("{}{}", blue("КОЛИЧЕСТВО ЗНАКОВ ПЕРЕБОРА СЛЕВА:"), green(comb_perebor_left));
+        }
+    }
     //-------------------------------------------------------------------------------
-
-
-    println!("{}{}", blue("ДОБАВЛЕНИЕ ПРОБЕЛА:"), green(probel.clone()));
-    if mode == 0 {
-        println!("{}{}", blue("УВЕЛИЧЕНИЕ ДЛИННЫ ПАРОЛЯ:"), green(len_uvelichenie.clone()));
-        println!("{}{}", blue("НАЧАЛО ПЕРЕБОРА:"), green(start_perebor.clone()));
+    if mode>2{
+        println!("{}", red("!!!"));
+        println!("{}", red(format!("{mode} ТАКОГО РЕЖИМА РАБОТА ПОКА НЕТ\nесть:\n0 последовательный перебор\n1 рандом\n2 комбинированый")));
+        println!("{}", red("!!!"));
+        jdem_user_to_close_programm();
+        return;
     }
     println!("{}{}", blue("РЕЖИМ ГЕНЕРАЦИИ ПАРОЛЯ:"), green(get_mode_text(mode)));
-    if mode == 2 {
-        println!("{}{}", blue("КОЛИЧЕСТВО ЗНАКОВ ПЕРЕБОРА СЛЕВА:"), green(comb_perebor_left));
-    }
-    if mode == 3 {
-        println!("{}", blue("ВКЛЮЧЕННО ИСПОЛЬЗОВАНИЕ СПИСКА:"));
-        //Чтение списка шаблонов, и если их нет создадим
-        //-----------------------------------------------------------------
-        get_len_find_create(FILE_LIST);
-    }
-    println!("{}{}", blue("ДОБАВЛЕНИЕ S В НАЧАЛЕ(для поиска миникей):"), green(minikey.clone()));
-    let prefix = if minikey {
-        //если включен режим миникей то отнимем 1 из общей длинны для первой S
-        dlinn_a_pasvord = dlinn_a_pasvord - 1;
-        //укажем нужный префикс
-        "S"
-    } else { "" };
 
-    if show_info{
+    if show_info {
         println!("{}{}", blue("ОТОБРАЖЕНИЕ СКОРОСТИ И ТЕКУЩЕГО ПОДБОРА:"), green("ВКЛЮЧЕННО"));
-    }else {
+    } else {
         println!("{}{}", blue("ОТОБРАЖЕНИЕ СКОРОСТИ И ТЕКУЩЕГО ПОДБОРА:"), green("ОТКЛЮЧЕННО"));
         println!("{}{}", blue("-ВРЕМЯ АВТОСОХРАНЕНИЯ ТЕКУЩЕГО ПОДБОРА:"), green(time_save_tekushego_bodbora.clone()));
     }
 
     println!("{}", blue("************************************"));
     //|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
-
-
-    //проверка есть ли в базе вообще чего
-    if find_btc == false && find_eth == false {
-        println!("{}", red("БАЗА ПУСТА\nпоместите рядом с программой текстовые файлы со списком адресов:\nbtc.txt eth.txt"));
-        jdem_user_to_close_programm();
-        return;
-    }
 
     //главные каналы
     let (main_sender, main_receiver) = mpsc::channel();
@@ -486,7 +512,7 @@ async fn main() {
 
                 // Получаем хеш SHA-256 из пароля
                 let mut sha256 = Sha256::new();
-                sha256.update(format!("{prefix}{}", password_string));
+                sha256.update(password_string.clone());
                 let h = sha256.finalize().0;
 
                 // Получаем публичный ключ для разных систем , адрюха не дружит с ice_library
@@ -506,53 +532,50 @@ async fn main() {
                 };
                 //----------------------------------------------------------------------------
 
-                //проверка наличия в базе BTC
-                if find_btc {
-                    //получем из них хеш160
-                    let h160c = hash160(&pk_c[0..]).0;
 
-                    //проверка наличия в базе BTC compress
-                    if database_cl.contains(&h160c) {
-                        let address_btc = get_legacy(h160c, LEGACY_BTC);
-                        let address_btc_bip84 =segwit::encode(hrp::BC,segwit::VERSION_0,&h160c).unwrap();
-                        let address_doge = get_legacy(h160c, LEGACY_DOGE);
-                        let address = format!("\n-BTC compress:{}\nBTC bip84:{}\n-DOGECOIN compress:{}", address_btc,address_btc_bip84, address_doge);
-                        let private_key_c = hex_to_wif_compressed(&h.to_vec());
-                        print_and_save(hex::encode(&h), &private_key_c, address, &password_string);
-                    }
+                //получем из них хеш160
+                let h160c = hash160(&pk_c[0..]).0;
 
-                    //получем из них хеш160
-                    let h160u = hash160(&pk_u[0..]).0;
-
-                    //проверка наличия в базе BTC uncompres
-                    if database_cl.contains(&h160u) {
-                        let address_btc = get_legacy(h160u, LEGACY_BTC);
-                        let address_doge = get_legacy(h160u, LEGACY_DOGE);
-                        let address = format!("\n-BTC uncompres:{}\n-DOGECOIN uncompres:{}", address_btc, address_doge);
-                        let private_key_u = hex_to_wif_uncompressed(&h.to_vec());
-                        print_and_save(hex::encode(&h), &private_key_u, address, &password_string);
-                    }
-
-                    let bip49_hash160 = bip_49_hash160c(h160c);
-
-                    //проверка наличия в базе BTC bip49 3.....
-                    if database_cl.contains(&bip49_hash160) {
-                        let address_btc = get_bip49_address(&bip49_hash160, BIP49_BTC);
-                        let address_doge = get_bip49_address(&bip49_hash160, BIP49_DOGE);
-                        let address = format!("\n-BTC bip49:{}\n-DOGECOIN bip49:{}", address_btc, address_doge);
-                        let private_key_c = hex_to_wif_compressed(&h.to_vec());
-                        print_and_save(hex::encode(&h), &private_key_c, address, &password_string);
-                    }
+                //проверка наличия в базе BTC compress
+                if database_cl.contains(&h160c) {
+                    let address_btc = get_legacy(h160c, LEGACY_BTC);
+                    let address_btc_bip84 = segwit::encode(hrp::BC, segwit::VERSION_0, &h160c).unwrap();
+                    let address_doge = get_legacy(h160c, LEGACY_DOGE);
+                    let address = format!("\n-BTC compress:{}\nBTC bip84:{}\n-DOGECOIN compress:{}", address_btc, address_btc_bip84, address_doge);
+                    let private_key_c = hex_to_wif_compressed(&h.to_vec());
+                    print_and_save(hex::encode(&h), &private_key_c, address, &password_string);
                 }
 
-                //проверка наличия в базе ETH
-                if find_eth {
-                    if database_cl.contains(&get_eth_kessak_from_public_key(pk_u)) {
-                        let adr_eth = hex::encode(get_eth_kessak_from_public_key(pk_u));
-                        let adr_trx = get_trx_from_eth(adr_eth.clone());
-                        print_and_save_eth(hex::encode(&h), format!("\n-ETH 0x{adr_eth}\n-TRX {adr_trx}"), &password_string);
-                    }
+                //получем из них хеш160
+                let h160u = hash160(&pk_u[0..]).0;
+
+                //проверка наличия в базе BTC uncompres
+                if database_cl.contains(&h160u) {
+                    let address_btc = get_legacy(h160u, LEGACY_BTC);
+                    let address_doge = get_legacy(h160u, LEGACY_DOGE);
+                    let address = format!("\n-BTC uncompres:{}\n-DOGECOIN uncompres:{}", address_btc, address_doge);
+                    let private_key_u = hex_to_wif_uncompressed(&h.to_vec());
+                    print_and_save(hex::encode(&h), &private_key_u, address, &password_string);
                 }
+
+                let bip49_hash160 = bip_49_hash160c(h160c);
+
+                //проверка наличия в базе BTC bip49 3.....
+                if database_cl.contains(&bip49_hash160) {
+                    let address_btc = get_bip49_address(&bip49_hash160, BIP49_BTC);
+                    let address_doge = get_bip49_address(&bip49_hash160, BIP49_DOGE);
+                    let address = format!("\n-BTC bip49:{}\n-DOGECOIN bip49:{}", address_btc, address_doge);
+                    let private_key_c = hex_to_wif_compressed(&h.to_vec());
+                    print_and_save(hex::encode(&h), &private_key_c, address, &password_string);
+                }
+
+
+                if database_cl.contains(&get_eth_kessak_from_public_key(pk_u)) {
+                    let adr_eth = hex::encode(get_eth_kessak_from_public_key(pk_u));
+                    let adr_trx = get_trx_from_eth(adr_eth.clone());
+                    print_and_save_eth(hex::encode(&h), format!("\n-ETH 0x{adr_eth}\n-TRX {adr_trx}"), &password_string);
+                }
+
 
                 //шлём в главный поток для получения следующей задачи
                 main_sender.send(ch).unwrap();
@@ -579,7 +602,7 @@ async fn main() {
     let alvabet = format!("{alvabet}{spase}");
 
     let charset_chars: Vec<char> = alvabet.chars().collect();
-    let charset_len = charset_chars.len();
+    let charset_len = if alfabet_ili_list { charset_chars.len() } else { lines.len() };
 
     //состовляем начальную позицию
     let mut current_combination = vec![0; dlinn_a_pasvord];
@@ -601,106 +624,14 @@ async fn main() {
     }
     //-----------------------------------------------------------------------------------
 
-
-    let binding = if mode == 3 {
-        let lines = read_lines(FILE_LIST);
-        // Преобразуем строки в вектор
-        lines.filter_map(Result::ok).collect::<Vec<String>>()
-    } else {
-        let lines = read_lines(FILE_LIST);
-        // Преобразуем строки в вектор
-        lines.filter_map(Result::ok).collect::<Vec<String>>()
-    };
-
-    let list_words = binding.iter().combinations(dlinn_a_pasvord);
-
     //--ГЛАВНЫЙ ЦИКЛ
     // слушаем ответы потоков и если есть шлём новую задачу
+    let mut password_string = "stroka".to_string();
     //----------------------------------------------------------------------------------------------
     for received in main_receiver {
         let ch = received;
 
-        if mode == 3 {
-            // Перебираем все возможные комбинации строк
-            // Получаем следующую комбинацию
-            // let combined_line = if let Some(vec_of_strings) = list_words.next() {
-            //     let combined_line = vec_of_strings
-            //         .iter()
-            //         .map(|s| s.as_str())
-            //         .collect::<Vec<&str>>()
-            //         .join(" ");
-            //     combined_line
-            // } else {
-            //     println!("{}{}", blue(format!("ДЛИНА ПАРОЛЯ:{} ПЕРЕБРАТА", green(dlinn_a_pasvord))), magenta(format!(" за:{:?}", start.elapsed())));
-            //     dlinn_a_pasvord = dlinn_a_pasvord + 1;
-            //     list_words = binding.iter().combinations(dlinn_a_pasvord);
-            //     println!("{}{:?}", blue("ТЕКУЩАЯ ДЛИНА ПАРОЛЯ:"), green(dlinn_a_pasvord));
-            //     "ПЕРЕБРАТЫ ВСЕ ВОЗМОЖНЫЕ КОМБИНАЦИИ".to_string()
-            // };
-
-            //получаем случайную
-            let combined_line = if let Some(random_combination) = list_words.clone().choose(&mut rng) {
-                let combined_line = random_combination
-                    .iter()
-                    .map(|s| s.as_str())
-                    .collect::<Vec<&str>>()
-                    .join(" ");
-                combined_line
-            } else {
-                "No combinations available".to_string()
-            };
-
-
-            if show_info {
-                //измеряем скорость и шлём прогресс
-                speed = speed + 1;
-                if start.elapsed() >= one_sek {
-                    let mut stdout = stdout();
-                    print!("{}\r{}", BACKSPACE, green(format!("SPEED:{speed}/s|{}", (format!("{}{}", prefix, combined_line)))));
-                    stdout.flush().unwrap();
-                    start = Instant::now();
-                    speed = 0;
-                }
-            }
-
-            // Отправляем новую в свободный канал
-            channels[ch].send(combined_line).unwrap();
-        } else {
-
-            // следующая комбинация пароля если алфавит пустой будем по всем возможным перебирать
-            let password_string: String = if alfabet_all {
-                current_combination.iter().map(|&c| char::from_u32(c as u32).unwrap_or(' ')).collect()
-            } else {
-                String::from_iter(
-                    current_combination.iter().map(|&idx| charset_chars[idx])
-                )
-            };
-
-
-            speed = speed + 1;
-            if show_info {
-                //измеряем скорость и шлём прогресс
-                if start.elapsed() >= one_sek {
-                    let mut stdout = stdout();
-                    print!("{}\r{}", BACKSPACE, green(format!("SPEED:{speed}/s|{}", (format!("{}{}", prefix, password_string)))));
-                    stdout.flush().unwrap();
-                    start = Instant::now();
-                    speed = 0;
-                }
-            }else {
-                // или через некоторое время будем сохранять в файл текущий подбор
-                if speed> time_save_tekushego_bodbora {
-                    let podbor = if minikey{format!("S{password_string}")}else { password_string.clone() };
-                    println!("{}{}", blue("ТЕКУЩИЙ ПОДБОР:"), green(podbor.clone()));
-                    add_v_file("ТЕКУЩИЙ ПОДБОР.txt",format!("{}\n",podbor));
-                    speed = 0;
-                }
-            }
-
-
-            // Отправляем новую в свободный канал
-            channels[ch].send(password_string).unwrap();
-
+        if alfabet_ili_list {
             //перебор
             if mode == 0 {
                 let mut i = dlinn_a_pasvord;
@@ -770,17 +701,135 @@ async fn main() {
                     }
                 }
             }
+
+            // следующая комбинация пароля если алфавит пустой будем по всем возможным перебирать
+            password_string = if alfabet_all {
+                current_combination.iter().map(|&c| char::from_u32(c as u32).unwrap_or(' ')).collect()
+            } else {
+                String::from_iter(
+                    current_combination.iter().map(|&idx| charset_chars[idx])
+                )
+            };
+
+            password_string = if minikey { format!("S{password_string}") } else { password_string };
+        } else {
+            // последовательный перебор
+            if mode == 0 {
+                let mut i = dlinn_a_pasvord;
+                while i > 0 {
+                    i -= 1;
+                    if current_combination[i] + 1 < charset_len {
+                        current_combination[i] += 1;
+                        break;
+                    } else {
+                        current_combination[i] = 0;
+                    }
+                }
+
+                if i == 0 && current_combination[0] == charset_len - 1 {
+                    //если включенно увеличение длинны увеличим иначе выйдем из цикла
+                    if len_uvelichenie {
+                        println!("{}{}", blue(format!("ДЛИНА ПАРОЛЯ:{}", green(dlinn_a_pasvord))), magenta(format!(" ПЕРЕБРАТА за:{:?}", start.elapsed())));
+                        dlinn_a_pasvord = dlinn_a_pasvord + 1;
+                        current_combination = vec![0; dlinn_a_pasvord];
+                        println!("{}{:?}", blue("ТЕКУЩАЯ ДЛИНА ПАРОЛЯ:"), green(dlinn_a_pasvord));
+                    } else {
+                        println!("{}", blue(format!("ГОТОВО,перебраты все возможные из {} длинной {}", alvabet, dlinn_a_pasvord)));
+                        jdem_user_to_close_programm();
+                        break;
+                    }
+                }
+
+                let mut s = String::new();
+                for i in current_combination.iter() {
+                    s.push_str(lines.get(*i).unwrap());
+                    s.push(' ');
+                }
+
+                password_string = s.trim().to_string();
+            }
+
+            //случайный набор строк по длинне
+            if mode == 1 {
+                let mut k = String::new(); // Создаем пустую строку
+                for _ in 0..dlinn_a_pasvord {
+                    let rand = lines.get(rng.gen_range(0..lines.len())).unwrap();
+                    k.push_str(rand);
+                    k.push(' '); // Добавляем разделитель между словами
+                }
+                k.pop(); // Удаляем последний пробел
+                password_string = k;
+            }
+
+            //комбенированый режим
+            if mode == 2 {
+                //будем переберать слева указаное количество
+                let mut i = comb_perebor_left;
+                while i > 0 {
+                    i -= 1;
+                    if current_combination[i] + 1 < charset_len {
+                        current_combination[i] += 1;
+                        break;
+                    } else {
+                        current_combination[i] = 0;
+                    }
+                }
+
+                if i == 0 && current_combination[0] == charset_len - 1 {
+                    for f in 0..dlinn_a_pasvord {
+                        //заполняем слева начальными значениями
+                        if f < comb_perebor_left {
+                            current_combination[f] = 0;
+                        } else {
+                            //остальные рандомно
+                            current_combination[f] = rng.gen_range(0..charset_len);
+                        }
+                    }
+                }
+                let mut s = String::new();
+                for i in current_combination.iter() {
+                    s.push_str(lines.get(*i).unwrap());
+                    s.push(' ');
+                }
+
+                password_string = s.trim().to_string();
+            }
         }
+
+
+        speed = speed + 1;
+        if show_info {
+            //измеряем скорость и шлём прогресс
+            if start.elapsed() >= one_sek {
+                let mut stdout = stdout();
+                print!("{}\r{}", BACKSPACE, green(format!("SPEED:{speed}/s|{}", format!("{}", password_string))));
+                stdout.flush().unwrap();
+                start = Instant::now();
+                speed = 0;
+            }
+        } else {
+            // или через некоторое время будем сохранять в файл текущий подбор
+            if speed > time_save_tekushego_bodbora {
+                println!("{}{}", blue("ТЕКУЩИЙ ПОДБОР:"), green(password_string.clone()));
+
+                let alf = if alfabet_ili_list { alvabet.clone() } else { format!("List.txt Длинна{}", dlinn_a_pasvord) };
+
+                add_v_file("ТЕКУЩИЙ ПОДБОР.txt", format!("{} {}\n", password_string.clone(), alf));
+                speed = 0;
+            }
+        }
+        // Отправляем новую в свободный канал
+        channels[ch].send(password_string.clone()).unwrap();
     }
-    //------------------------------------------------------------------------------------
 }
+//------------------------------------------------------------------------------------
 
 fn get_mode_text(mode: usize) -> String {
     match mode {
         0 => "ПОСЛЕДОВАТЕЛЬНЫЙ ПЕРЕБОР".to_string(),
         1 => "РАНДОМ".to_string(),
         2 => "КОМБИНИРОВАННЫЙ".to_string(),
-        _ => { "ХЗ".to_string() }
+        _ => { red("ХЗ").to_string() }
     }
 }
 
@@ -956,7 +1005,7 @@ pub fn get_len_find_create(coin: &str) -> usize {
                 "dogecoin.txt" => { include_str!("dogecoin.txt") }
                 "eth.txt" => { include_str!("eth.txt") }
                 "trx.txt" => { include_str!("trx.txt") }
-                "list.txt" => { include_str!("bip39_words.txt") }
+                "list.txt" => { include_str!("list.txt") }
                 _ => { include_str!("btc.txt") }
             };
             add_v_file(coin, dockerfile.to_string());
@@ -1021,5 +1070,33 @@ fn bip84_to_h160(address: String) -> [u8; 20] {
         h160
     } else {
         [0u8; 20]
+    }
+}
+
+
+//сохранение и загрузка базы из файла
+fn save_to_file(set: &HashSet<[u8; 20]>, file_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    match File::create(file_path) {
+        Ok(file) => {
+            let writer = BufWriter::new(file);
+            match serialize_into(writer, set) {
+                Ok(_) => Ok(()),
+                Err(e) => Err(Box::new(e)),
+            }
+        }
+        Err(e) => Err(Box::new(e)),
+    }
+}
+
+fn load_from_file(file_path: &str) -> Result<HashSet<[u8; 20]>, Box<dyn std::error::Error>> {
+    match File::open(file_path) {
+        Ok(file) => {
+            let reader = BufReader::new(file);
+            match deserialize_from(reader) {
+                Ok(set) => Ok(set),
+                Err(e) => Err(Box::new(e)),
+            }
+        }
+        Err(e) => Err(Box::new(e)),
     }
 }
