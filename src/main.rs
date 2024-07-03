@@ -445,11 +445,19 @@ async fn main() {
             alvabet
         };
         println!("{}{}", blue("ДОБАВЛЕНИЕ ПРОБЕЛА:"), green(probel.clone()));
-        println!("{}{}", blue("ДОБАВЛЕНИЕ S В НАЧАЛЕ(для поиска миникей):"), green(minikey.clone()));
+
+        //если включен режим миникей
         if minikey {
-            //если включен режим миникей то отнимем 1 из общей длинны для первой S
+            println!("{}{}", blue("S В НАЧАЛЕ(для поиска миникей):"), green("ВКЛЮЧЕННО"));
+            //проверим правельная ли указана длинна для первой серии 22
+            if dlinn_a_pasvord !=22{
+                //если че просто покажем предупреждение красным
+                println!("{}", red(format!("ВЫСТАВНЕННА ДЛИННА:{dlinn_a_pasvord} , У МИНИКЕЙ ПАРОЛЕЙ ПЕРВОЙ СЕРИИ ДЛИННА 22 СИМВОЛА")));
+            }
+            //отнимем 1 из общей длинны для первой S
             dlinn_a_pasvord = dlinn_a_pasvord - 1;
         };
+
         if mode == 0 {
             println!("{}{}", blue("УВЕЛИЧЕНИЕ ДЛИННЫ ПАРОЛЯ:"), green(len_uvelichenie.clone()));
             println!("{}{}", blue("НАЧАЛО ПЕРЕБОРА:"), green(start_perebor.clone()));
@@ -540,12 +548,15 @@ async fn main() {
 
                 //проверка наличия в базе BTC compress
                 if database_cl.contains(&h160c) {
-                    let address_btc = get_legacy(h160c, LEGACY_BTC);
-                    let address_btc_bip84 = segwit::encode(hrp::BC, segwit::VERSION_0, &h160c).unwrap();
-                    let address_doge = get_legacy(h160c, LEGACY_DOGE);
-                    let address = format!("\n-BTC compress:{}\nBTC bip84:{}\n-DOGECOIN compress:{}", address_btc, address_btc_bip84, address_doge);
-                    let private_key_c = hex_to_wif_compressed(&h.to_vec());
-                    print_and_save(hex::encode(&h), &private_key_c, address, &password_string);
+                    //пропустим ложное
+                    if password_string != "инициализация потока, пароль <ничто> найденые адреса вне диапазона, хз"{
+                        let address_btc = get_legacy(h160c, LEGACY_BTC);
+                        let address_btc_bip84 = segwit::encode(hrp::BC, segwit::VERSION_0, &h160c).unwrap();
+                        let address_doge = get_legacy(h160c, LEGACY_DOGE);
+                        let address = format!("\n-BTC compress:{}\nBTC bip84:{}\n-DOGECOIN compress:{}", address_btc, address_btc_bip84, address_doge);
+                        let private_key_c = hex_to_wif_compressed(&h.to_vec());
+                        print_and_save(hex::encode(&h), &private_key_c, address, &password_string);
+                    }
                 }
 
                 //получем из них хеш160
@@ -553,29 +564,38 @@ async fn main() {
 
                 //проверка наличия в базе BTC uncompres
                 if database_cl.contains(&h160u) {
-                    let address_btc = get_legacy(h160u, LEGACY_BTC);
-                    let address_doge = get_legacy(h160u, LEGACY_DOGE);
-                    let address = format!("\n-BTC uncompres:{}\n-DOGECOIN uncompres:{}", address_btc, address_doge);
-                    let private_key_u = hex_to_wif_uncompressed(&h.to_vec());
-                    print_and_save(hex::encode(&h), &private_key_u, address, &password_string);
+                    //пропустим ложное
+                    if password_string != "инициализация потока, пароль <ничто> найденые адреса вне диапазона, хз" {
+                        let address_btc = get_legacy(h160u, LEGACY_BTC);
+                        let address_doge = get_legacy(h160u, LEGACY_DOGE);
+                        let address = format!("\n-BTC uncompres:{}\n-DOGECOIN uncompres:{}", address_btc, address_doge);
+                        let private_key_u = hex_to_wif_uncompressed(&h.to_vec());
+                        print_and_save(hex::encode(&h), &private_key_u, address, &password_string);
+                    }
                 }
 
                 let bip49_hash160 = bip_49_hash160c(h160c);
 
                 //проверка наличия в базе BTC bip49 3.....
                 if database_cl.contains(&bip49_hash160) {
-                    let address_btc = get_bip49_address(&bip49_hash160, BIP49_BTC);
-                    let address_doge = get_bip49_address(&bip49_hash160, BIP49_DOGE);
-                    let address = format!("\n-BTC bip49:{}\n-DOGECOIN bip49:{}", address_btc, address_doge);
-                    let private_key_c = hex_to_wif_compressed(&h.to_vec());
-                    print_and_save(hex::encode(&h), &private_key_c, address, &password_string);
+                    //пропустим ложное
+                    if password_string != "инициализация потока, пароль <ничто> найденые адреса вне диапазона, хз" {
+                        let address_btc = get_bip49_address(&bip49_hash160, BIP49_BTC);
+                        let address_doge = get_bip49_address(&bip49_hash160, BIP49_DOGE);
+                        let address = format!("\n-BTC bip49:{}\n-DOGECOIN bip49:{}", address_btc, address_doge);
+                        let private_key_c = hex_to_wif_compressed(&h.to_vec());
+                        print_and_save(hex::encode(&h), &private_key_c, address, &password_string);
+                    }
                 }
 
 
                 if database_cl.contains(&get_eth_kessak_from_public_key(pk_u)) {
-                    let adr_eth = hex::encode(get_eth_kessak_from_public_key(pk_u));
-                    let adr_trx = get_trx_from_eth(adr_eth.clone());
-                    print_and_save_eth(hex::encode(&h), format!("\n-ETH 0x{adr_eth}\n-TRX {adr_trx}"), &password_string);
+                    //пропустим ложное
+                    if password_string != "инициализация потока, пароль <ничто> найденые адреса вне диапазона, хз" {
+                        let adr_eth = hex::encode(get_eth_kessak_from_public_key(pk_u));
+                        let adr_trx = get_trx_from_eth(adr_eth.clone());
+                        print_and_save_eth(hex::encode(&h), format!("\n-ETH 0x{adr_eth}\n-TRX {adr_trx}"), &password_string);
+                    }
                 }
 
 
