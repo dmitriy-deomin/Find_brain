@@ -165,6 +165,60 @@ async fn main() {
         //-----------------------------------------------------------------------------------------------
 
         println!("{}", blue("--"));
+        //провереряем если файл с хешами BTC
+        //--------------------------------------------------------------------------------------------
+        if fs::metadata(Path::new("btc_h160.bin")).is_ok() {
+            println!("{}", green("файл btc_h160.bin уже существует,конвертирование пропущено"));
+        } else {
+            //проверяем есть ли файл(создаём) и считаем сколько строк
+            let len_btc_txt = get_len_find_create("btc.txt");
+
+            println!("{}", blue("конвертирование адресов в h160 и сохранение в btc_h160.bin"));
+            //конвертируем в h160 и записываем в файл рядом
+            //создаём файл
+            let mut file = File::create("btc_h160.bin").unwrap();
+            //ищем в списке нужные делаем им харакири и ложим обрубки в файл
+            let mut len_btc = 0;
+            for (index, address) in get_bufer_file("btc.txt").lines().enumerate() {
+                let address = address.expect("Ошибка чтения адреса со строки");
+
+                //адреса с bc1...
+                let binding = if address.starts_with("bc1") {
+                    bip84_to_h160(address)
+                } else {
+                    //адреса 1.. 3...
+                    match address.from_base58() {
+                        Ok(value) => {
+                            let mut a: [u8; 20] = [0; 20];
+                            if value.len() >= 21 {
+                                a.copy_from_slice(&value.as_slice()[1..21]);
+                                a
+                            } else {
+                                eprintln!("{}", red(format!("ОШИБКА, АДРЕС НЕ ВАЛИДЕН строка: {} {}", index + 1, address)));
+                                continue; // Skip this address and move to the next
+                            }
+                        }
+                        Err(_) => {
+                            eprintln!("{}", red(format!("ОШИБКА ДЕКОДИРОВАНИЯ В base58 строка: {} {}", index + 1, address)));
+                            continue; // Skip this address and move to the next
+                        }
+                    }
+                };
+
+
+                if let Err(e) = file.write_all(&binding) {
+                    eprintln!("Не удалось записать в файл: {}", e);
+                } else {
+                    len_btc = len_btc + 1;
+                }
+            }
+            println!("{}", blue(format!("конвертировано адресов в h160:{}/{}", green(len_btc_txt), green(len_btc))));
+        }
+        //-----------------------------------------------------------------------------------------------
+
+
+
+        println!("{}", blue("--"));
 
         //провереряем если файл с хешами DOGECOIN
         //--------------------------------------------------------------------------------------------
@@ -629,21 +683,41 @@ async fn main() {
     //состовляем начальную позицию
     let mut current_combination = vec![0; dlinn_a_pasvord];
 
-    //заполняем страртовыми значениями
-    for d in comb_perebor_left..dlinn_a_pasvord {
-        let position = match start_perebor.chars().nth(d) {
-            Some(ch) => {
-                // Находим позицию символа в charset_chars
-                charset_chars.iter().position(|&c| c == ch).unwrap_or_else(|| {
-                    let c = if alfabet_all { char::from_u32(0).unwrap() } else { ch };
-                    eprintln!("{}", red(format!("Знак:{} из *начала перебора* ненайден, установлен первый из алфавита", c)));
-                    0
-                })
-            }
-            None => { rng.gen_range(0..charset_len) }
-        };
-        current_combination[d] = position;
+    if alfabet_ili_list{
+        //заполняем страртовыми значениями для строки
+        for d in comb_perebor_left..dlinn_a_pasvord {
+            let position = match start_perebor.chars().nth(d) {
+                Some(ch) => {
+                    // Находим позицию символа в charset_chars
+                    charset_chars.iter().position(|&c| c == ch).unwrap_or_else(|| {
+                        let c = if alfabet_all { char::from_u32(0).unwrap() } else { ch };
+                        eprintln!("{}", red(format!("Знак:{} из *начала перебора* ненайден, установлен первый из алфавита", c)));
+                        0
+                    })
+                }
+                None => { rng.gen_range(0..charset_len) }
+            };
+            current_combination[d] = position;
+        }
+    }else{
+        // Разбиение строки на слова
+        let start_perebor_list: Vec<&str> = start_perebor.split_whitespace().collect();
+        //заполняем страртовыми значениями для фраз
+        for d in comb_perebor_left..dlinn_a_pasvord {
+            let position = match start_perebor_list.get(d) {
+                Some(&ch) => {
+                    // Находим позицию слова в charset_chars
+                   lines.iter().position(|c| c == ch).unwrap_or_else(|| {
+                        eprintln!("{}", format!("Слово:{} из *начала перебора* не найдено, установлено первое из алфавита", ch));
+                        0
+                    })
+                }
+                None => rng.gen_range(0..charset_len),
+            };
+            current_combination[d] = position;
+        }
     }
+
     //-----------------------------------------------------------------------------------
 
     //--ГЛАВНЫЙ ЦИКЛ
