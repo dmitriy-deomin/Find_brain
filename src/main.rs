@@ -475,22 +475,29 @@ async fn main() {
     if alvabet == "list.txt" {
         println!("{}", blue("ИСПОЛЬЗОВАНИЕ list.txt ВМЕСТО АЛФАВИТА"));
         get_len_find_create(FILE_LIST);
+        //если включенно рандомный список
         let list = read_lines(FILE_LIST);
         println!("{}", blue("-ОБРАБОТКА list.txt"));
         // Преобразуем строки в вектор
-        lines = list.filter_map(Result::ok).collect::<Vec<String>>();
+        lines =list.filter_map(Result::ok).collect::<Vec<String>>();
+        if rand_alfabet {lines = get_rand_list(lines,size_rand_alfabet)};
+        if rand_alfabet {
+            println!("{}{}", blue("СЛУЧАЙНЫЕ ИЗ СПИСКА:"), green("ВКЛЮЧЕННО"));
+            println!("{}{}", blue("-КОЛИЧЕСТВО СЛУЧАЙНЫХ ИЗ СПИСКА:"), green(size_rand_alfabet));
+            println!("{}{}", blue("-СПИСОК:"), green(lines.join(" ")));
+        };
         println!("{}", blue("-ГОТОВО"));
         alfabet_ili_list = false;
     } else {
         alfabet_ili_list = true;
         alvabet = if rand_alfabet {
             let rndalf = get_rand_alfabet(alvabet, size_rand_alfabet);
-            println!("{}{}", blue("СЛУЧАЙНЫЕ ИЗ АЛФАВИТА:"), green(rand_alfabet));
+            println!("{}{}", blue("СЛУЧАЙНЫЕ ИЗ АЛФАВИТА:"), green("ВКЛЮЧЕННО"));
             println!("{}{}", blue("-КОЛИЧЕСТВО СЛУЧАЙНЫХ ИЗ АЛФАВИТА:"), green(size_rand_alfabet));
             println!("{}{}", blue("-АЛФАВИТ:"), green(&rndalf));
             rndalf
         } else {
-            println!("{}{}", blue("СЛУЧАЙНЫЕ ИЗ АЛФАВИТА:"), green(rand_alfabet));
+            println!("{}{}", blue("СЛУЧАЙНЫЕ ИЗ АЛФАВИТА:"), green("ВЫКЛЮЧЕННО"));
             if alvabet == "0" {
                 println!("{}{}", blue("АЛФАВИТ:"), green("ВСЕ ВОЗМОЖНЫЕ"));
             } else {
@@ -1151,6 +1158,19 @@ fn get_rand_alfabet(alvabet: String, size_rand_alfabet: usize) -> String {
 
     // Берем первые size_rand_alfabet символов
     let selected_chars: Vec<char> = charset_chars.into_iter().take(size_rand_alfabet).collect();
+
+    // Создаем строку из выбранных символов
+    selected_chars.into_iter().collect()
+}
+
+//составляем случайный список из полного
+fn get_rand_list(mut list:  Vec<String>, size_rand_alfabet: usize) -> Vec<String> {
+    let mut rng = thread_rng();
+    // Перемешиваем символы
+    list.shuffle(&mut rng);
+
+    // Берем первые size_rand_alfabet символов
+    let selected_chars: Vec<String> = list.into_iter().take(size_rand_alfabet).collect();
 
     // Создаем строку из выбранных символов
     selected_chars.into_iter().collect()
