@@ -1,13 +1,16 @@
 use std::fs::{File, OpenOptions};
 use std::{fs, io, thread};
-use std::collections::HashSet;
+use std::collections::{BTreeSet};
 use std::io::{BufRead, BufReader, BufWriter, Lines, Read, stdout, Write};
 use std::path::Path;
+use std::str::FromStr;
 use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 use base58::{FromBase58, ToBase58};
 use bech32::{segwit, hrp};
 use bincode::{deserialize_from, serialize_into};
+use bip32::{DerivationPath, XPrv};
+use bip39::{Language, Mnemonic, Seed};
 use rand::{Rng, thread_rng};
 use rand::seq::SliceRandom;
 use ripemd::{Ripemd160, Digest as Ripemd160Digest};
@@ -53,6 +56,14 @@ async fn main() {
     println!("{}{}", blue("FIND BRAIN v:"), magenta(version));
     println!("{}", blue("==================="));
 
+
+    let mnemonic = Mnemonic::from_phrase("vacant slow chaos layer cannon soap absurd insect casino inquiry ensure zero",Language::English).unwrap();
+    let seed = Seed::new(&mnemonic, "");
+    let address = get_eth_address(seed.as_bytes());
+
+    println!("{} {}",hex::encode(address),mnemonic);
+
+
     //Чтение настроек, и если их нет создадим
     //-----------------------------------------------------------------
     let conf = match lines_from_file(&FILE_CONFIG) {
@@ -90,7 +101,7 @@ async fn main() {
     } else { 1 };
 
     //база со всеми адресами
-    let mut database: HashSet<[u8; 20]> = HashSet::new();
+    let mut database: BTreeSet<[u8; 20]> = BTreeSet::new();
 
 
     //проверим есть ли общая база
@@ -163,61 +174,6 @@ async fn main() {
             println!("{}", blue(format!("конвертировано адресов в h160:{}/{}", green(len_btc_txt), green(len_btc))));
         }
         //-----------------------------------------------------------------------------------------------
-
-        println!("{}", blue("--"));
-        //провереряем если файл с хешами BTC
-        //--------------------------------------------------------------------------------------------
-        if fs::metadata(Path::new("btc_h160.bin")).is_ok() {
-            println!("{}", green("файл btc_h160.bin уже существует,конвертирование пропущено"));
-        } else {
-            //проверяем есть ли файл(создаём) и считаем сколько строк
-            let len_btc_txt = get_len_find_create("btc.txt");
-
-            println!("{}", blue("конвертирование адресов в h160 и сохранение в btc_h160.bin"));
-            //конвертируем в h160 и записываем в файл рядом
-            //создаём файл
-            let mut file = File::create("btc_h160.bin").unwrap();
-            //ищем в списке нужные делаем им харакири и ложим обрубки в файл
-            let mut len_btc = 0;
-            for (index, address) in get_bufer_file("btc.txt").lines().enumerate() {
-                let address = address.expect("Ошибка чтения адреса со строки");
-
-                //адреса с bc1...
-                let binding = if address.starts_with("bc1") {
-                    bip84_to_h160(address)
-                } else {
-                    //адреса 1.. 3...
-                    match address.from_base58() {
-                        Ok(value) => {
-                            let mut a: [u8; 20] = [0; 20];
-                            if value.len() >= 21 {
-                                a.copy_from_slice(&value.as_slice()[1..21]);
-                                a
-                            } else {
-                                eprintln!("{}", red(format!("ОШИБКА, АДРЕС НЕ ВАЛИДЕН строка: {} {}", index + 1, address)));
-                                continue; // Skip this address and move to the next
-                            }
-                        }
-                        Err(_) => {
-                            eprintln!("{}", red(format!("ОШИБКА ДЕКОДИРОВАНИЯ В base58 строка: {} {}", index + 1, address)));
-                            continue; // Skip this address and move to the next
-                        }
-                    }
-                };
-
-
-                if let Err(e) = file.write_all(&binding) {
-                    eprintln!("Не удалось записать в файл: {}", e);
-                } else {
-                    len_btc = len_btc + 1;
-                }
-            }
-            println!("{}", blue(format!("конвертировано адресов в h160:{}/{}", green(len_btc_txt), green(len_btc))));
-        }
-        //-----------------------------------------------------------------------------------------------
-
-
-
         println!("{}", blue("--"));
 
         //провереряем если файл с хешами DOGECOIN
@@ -1189,9 +1145,8 @@ fn bip84_to_h160(address: String) -> [u8; 20] {
     }
 }
 
-
 //сохранение и загрузка базы из файла
-fn save_to_file(set: &HashSet<[u8; 20]>, file_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn save_to_file(set: &BTreeSet<[u8; 20]>, file_path: &str) -> Result<(), Box<dyn std::error::Error>> {
     match File::create(file_path) {
         Ok(file) => {
             let writer = BufWriter::new(file);
@@ -1204,7 +1159,7 @@ fn save_to_file(set: &HashSet<[u8; 20]>, file_path: &str) -> Result<(), Box<dyn 
     }
 }
 
-fn load_from_file(file_path: &str) -> Result<HashSet<[u8; 20]>, Box<dyn std::error::Error>> {
+fn load_from_file(file_path: &str) -> Result<BTreeSet<[u8; 20]>, Box<dyn std::error::Error>> {
     match File::open(file_path) {
         Ok(file) => {
             let reader = BufReader::new(file);
@@ -1215,4 +1170,15 @@ fn load_from_file(file_path: &str) -> Result<HashSet<[u8; 20]>, Box<dyn std::err
         }
         Err(e) => Err(Box::new(e)),
     }
+}
+
+fn get_eth_address(seed: &[u8]) ->  [u8; 32] {
+    let xprv = XPrv::new(seed).unwrap();
+    let derivation_path = DerivationPath::from_str("m/44'/60'/0'/0/0").unwrap();
+    let mut child_xprv = xprv;
+    for index in derivation_path.into_iter() {
+        child_xprv = child_xprv.derive_child(index).unwrap();
+    }
+    let private_key_bytes: [u8; 32] = child_xprv.private_key().to_bytes().into();
+    private_key_bytes
 }
