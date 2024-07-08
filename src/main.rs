@@ -1,24 +1,20 @@
 use std::fs::{File, OpenOptions};
 use std::{fs, io, thread};
-use std::collections::{BTreeSet};
+use std::collections::HashSet;
 use std::io::{BufRead, BufReader, BufWriter, Lines, Read, stdout, Write};
 use std::path::Path;
-use std::str::FromStr;
 use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 use base58::{FromBase58, ToBase58};
 use bech32::{segwit, hrp};
 use bincode::{deserialize_from, serialize_into};
-use bip32::{DerivationPath, XPrv};
-use bip39::{Language, Mnemonic, Seed};
 use rand::{Rng, thread_rng};
 use rand::seq::SliceRandom;
 use ripemd::{Ripemd160, Digest as Ripemd160Digest};
-
 use crate::color::{blue, cyan, green, magenta, red};
 use rustils::parse::boolean::string_to_bool;
 use sha2::{Sha256, Digest};
-use sv::util::hash160;
+use sv::util::{hash160};
 use tiny_keccak::{Hasher, Keccak};
 
 
@@ -56,14 +52,6 @@ async fn main() {
     println!("{}{}", blue("FIND BRAIN v:"), magenta(version));
     println!("{}", blue("==================="));
 
-
-    let mnemonic = Mnemonic::from_phrase("vacant slow chaos layer cannon soap absurd insect casino inquiry ensure zero",Language::English).unwrap();
-    let seed = Seed::new(&mnemonic, "");
-    let address = get_eth_address(seed.as_bytes());
-
-    println!("{} {}",hex::encode(address),mnemonic);
-
-
     //Чтение настроек, и если их нет создадим
     //-----------------------------------------------------------------
     let conf = match lines_from_file(&FILE_CONFIG) {
@@ -100,8 +88,9 @@ async fn main() {
         comb_perebor_left_
     } else { 1 };
 
+
     //база со всеми адресами
-    let mut database: BTreeSet<[u8; 20]> = BTreeSet::new();
+    let mut database: HashSet<[u8; 20]> = HashSet::new();
 
 
     //проверим есть ли общая база
@@ -1146,7 +1135,7 @@ fn bip84_to_h160(address: String) -> [u8; 20] {
 }
 
 //сохранение и загрузка базы из файла
-fn save_to_file(set: &BTreeSet<[u8; 20]>, file_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn save_to_file(set: &HashSet<[u8; 20]>, file_path: &str) -> Result<(), Box<dyn std::error::Error>> {
     match File::create(file_path) {
         Ok(file) => {
             let writer = BufWriter::new(file);
@@ -1159,7 +1148,7 @@ fn save_to_file(set: &BTreeSet<[u8; 20]>, file_path: &str) -> Result<(), Box<dyn
     }
 }
 
-fn load_from_file(file_path: &str) -> Result<BTreeSet<[u8; 20]>, Box<dyn std::error::Error>> {
+fn load_from_file(file_path: &str) -> Result<HashSet<[u8; 20]>, Box<dyn std::error::Error>> {
     match File::open(file_path) {
         Ok(file) => {
             let reader = BufReader::new(file);
@@ -1170,15 +1159,4 @@ fn load_from_file(file_path: &str) -> Result<BTreeSet<[u8; 20]>, Box<dyn std::er
         }
         Err(e) => Err(Box::new(e)),
     }
-}
-
-fn get_eth_address(seed: &[u8]) ->  [u8; 32] {
-    let xprv = XPrv::new(seed).unwrap();
-    let derivation_path = DerivationPath::from_str("m/44'/60'/0'/0/0").unwrap();
-    let mut child_xprv = xprv;
-    for index in derivation_path.into_iter() {
-        child_xprv = child_xprv.derive_child(index).unwrap();
-    }
-    let private_key_bytes: [u8; 32] = child_xprv.private_key().to_bytes().into();
-    private_key_bytes
 }
