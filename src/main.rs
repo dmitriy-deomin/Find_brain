@@ -3,7 +3,7 @@ use std::{fs, io, thread};
 use std::collections::HashSet;
 use std::io::{BufRead, BufReader, BufWriter, Lines, Read, stdout, Write};
 use std::path::Path;
-use std::sync::{Arc, mpsc};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use base58::{FromBase58, ToBase58};
 use bech32::{segwit, hrp};
@@ -16,6 +16,7 @@ use rustils::parse::boolean::string_to_bool;
 use sha2::{Sha256, Digest};
 use sv::util::{hash160};
 use tiny_keccak::{Hasher, Keccak};
+use crossbeam::channel;
 
 
 #[cfg(not(windows))]
@@ -43,7 +44,6 @@ pub const LEGACY_LTC: u8 = 0x30;
 const BACKSPACE: char = 8u8 as char;
 const FILE_CONFIG: &str = "confBrain.txt";
 const FILE_LIST: &str = "list.txt";
-
 
 #[tokio::main]
 async fn main() {
@@ -84,14 +84,10 @@ async fn main() {
     //---------------------------------------------------------------------
 
     //если укажут меньше или 0
-    let comb_perebor_left = if comb_perebor_left_ >= 0 {
-        comb_perebor_left_
-    } else { 1 };
-
+    let comb_perebor_left = if comb_perebor_left_ <= 0 { 1 } else { comb_perebor_left_ };
 
     //база со всеми адресами
     let mut database: HashSet<[u8; 20]> = HashSet::new();
-
 
     //проверим есть ли общая база
     if fs::metadata(Path::new("database.bin")).is_ok() {
@@ -431,7 +427,13 @@ async fn main() {
             println!("{}{}", blue("-КОЛИЧЕСТВО СЛУЧАЙНЫХ ИЗ СПИСКА:"), green(size_rand_alfabet));
             println!("{}{}", blue("-СПИСОК:"), green(lines.join(" ")));
         };
+        println!("{}{}", blue("НАЧАЛО ПЕРЕБОРА:"), green(start_perebor.clone()));
+        if mode == 0 {
+            println!("{}{}", blue("УВЕЛИЧЕНИЕ ДЛИННЫ ПАРОЛЯ:"), green(len_uvelichenie.clone()));
+
+        }
         println!("{}", blue("-ГОТОВО"));
+
         alfabet_ili_list = false;
     } else {
         alfabet_ili_list = true;
@@ -454,7 +456,7 @@ async fn main() {
 
         //если включен режим миникей
         if minikey {
-            println!("{}{}", blue("S В НАЧАЛЕ(для поиска миникей):"), green("ВКЛЮЧЕННО"));
+            println!("{}{}", blue("S В НАЧАЛЕ(для поиска миникей и пропуск невалидных ):"), green("ВКЛЮЧЕННО"));
             //проверим правельная ли указана длинна для первой серии 22
             if dlinn_a_pasvord !=22{
                 //если че просто покажем предупреждение красным
@@ -493,8 +495,7 @@ async fn main() {
     //|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
 
     //главные каналы
-    let (main_sender, main_receiver) = mpsc::channel();
-
+    let (main_sender, main_receiver) = channel::unbounded();
     // Запускаем выбраное количество потоков(ядер) постоянно работающих
     //----------------------------------------------------------------------------------
     //будет храниться список запушеных потоков(каналов для связи)
@@ -504,7 +505,7 @@ async fn main() {
 
     for ch in 0..cpu_core {
         //создаём для каждого потока отдельный канал для связи
-        let (sender, receiver) = mpsc::channel();
+        let (sender, receiver) = channel::unbounded();
 
         let database_cl = database.clone();
 
@@ -526,85 +527,126 @@ async fn main() {
             loop {
                 let password_string: String = receiver.recv().unwrap_or("error".to_string());
 
-                // Получаем хеш SHA-256 из пароля
-                let mut sha256 = Sha256::new();
-                sha256.update(password_string.clone());
-                let h = sha256.finalize().0;
+                //если включен режим миникей проверим на валидность ключ
+                if minikey {
+                    // Получаем хеш SHA-256 из пароля
+                    let mut sha256 = Sha256::new();
+                    sha256.update(password_string.as_str().to_owned()+"?");
 
-                // Получаем публичный ключ для разных систем , адрюха не дружит с ice_library
-                //------------------------------------------------------------------------
-                #[cfg(windows)]
-                let (pk_u, pk_c) = {
-                    let p = ice_library.privatekey_to_publickey(&h);
-                    (p, ice_library.publickey_uncompres_to_compres(&p))
-                };
+                    // Проверяем, что первый байт равен нулю
+                    if sha256.finalize().0[0] == 0{
+                        // Получаем хеш SHA-256 из пароля
+                        let mut sha256 = Sha256::new();
+                        sha256.update(password_string.as_str());
+                        let h = sha256.finalize().0;
 
-                #[cfg(not(windows))]
-                let (pk_u, pk_c) = {
-                    // Создаем секретный ключ из байт
-                    let secret_key = SecretKey::from_slice(&h).expect("32 bytes, within curve order");
-                    let public_key = PublicKey::from_secret_key(&secp, &secret_key);
-                    (public_key.serialize_uncompressed(), public_key.serialize())
-                };
-                //----------------------------------------------------------------------------
+                        // Получаем публичный ключ для разных систем, адрюха не дружит с ice_library
+                        //------------------------------------------------------------------------
+                        #[cfg(windows)]
+                        let pk_u= ice_library.privatekey_to_publickey(&h);
+
+                        #[cfg(not(windows))]{
+                            let secret_key = SecretKey::from_slice(&h).expect("32 bytes, within curve order");
+                            let public_key = PublicKey::from_secret_key(&secp, &secret_key);
+                            let pk_u = public_key.serialize_uncompressed();
+                        };
+                        //----------------------------------------------------------------------------
+
+                        //получем из них хеш160
+                        let h160u = hash160(&pk_u[0..]).0;
+
+                        //проверка наличия в базе BTC uncompres
+                        if database_cl.contains(&h160u) {
+                            //пропустим ложное
+                            if password_string != "инициализация потока, пароль <ничто> найденые адреса вне диапазона, хз" {
+                                let address_btc = get_legacy(h160u, LEGACY_BTC);
+                                let address = format!("\n-BTC uncompres:{}\n", address_btc);
+                                let private_key_u = hex_to_wif_uncompressed(&h.to_vec());
+                                print_and_save(hex::encode(&h), &private_key_u, address, &password_string);
+                            }
+                        }
 
 
-                //получем из них хеш160
-                let h160c = hash160(&pk_c[0..]).0;
+                    }
+                }else {
+                    // Получаем хеш SHA-256 из пароля
+                    let mut sha256 = Sha256::new();
+                    sha256.update(password_string.as_str());
+                    let h = sha256.finalize().0;
 
-                //проверка наличия в базе BTC compress
-                if database_cl.contains(&h160c) {
-                    //пропустим ложное
-                    if password_string != "инициализация потока, пароль <ничто> найденые адреса вне диапазона, хз"{
-                        let address_btc = get_legacy(h160c, LEGACY_BTC);
-                        let address_btc_bip84 = segwit::encode(hrp::BC, segwit::VERSION_0, &h160c).unwrap();
-                        let address_doge = get_legacy(h160c, LEGACY_DOGE);
-                        let address = format!("\n-BTC compress:{}\nBTC bip84:{}\n-DOGECOIN compress:{}", address_btc, address_btc_bip84, address_doge);
-                        let private_key_c = hex_to_wif_compressed(&h.to_vec());
-                        print_and_save(hex::encode(&h), &private_key_c, address, &password_string);
+                    // Получаем публичный ключ для разных систем , адрюха не дружит с ice_library
+                    //------------------------------------------------------------------------
+                    #[cfg(windows)]
+                    let (pk_u, pk_c) = {
+                        let p = ice_library.privatekey_to_publickey(&h);
+                        (p, ice_library.publickey_uncompres_to_compres(&p))
+                    };
+
+                    #[cfg(not(windows))]
+                    let (pk_u, pk_c) = {
+                        // Создаем секретный ключ из байта
+                        let secret_key = SecretKey::from_slice(&h).expect("32 bytes, within curve order");
+                        let public_key = PublicKey::from_secret_key(&secp, &secret_key);
+                        (public_key.serialize_uncompressed(), public_key.serialize())
+                    };
+                    //----------------------------------------------------------------------------
+
+
+                    //получем из них хеш160
+                    let h160c = hash160(&pk_c[0..]).0;
+
+                    //проверка наличия в базе BTC compress
+                    if database_cl.contains(&h160c) {
+                        //пропустим ложное
+                        if password_string != "инициализация потока, пароль <ничто> найденые адреса вне диапазона, хз"{
+                            let address_btc = get_legacy(h160c, LEGACY_BTC);
+                            let address_btc_bip84 = segwit::encode(hrp::BC, segwit::VERSION_0, &h160c).unwrap();
+                            let address_doge = get_legacy(h160c, LEGACY_DOGE);
+                            let address = format!("\n-BTC compress:{}\nBTC bip84:{}\n-DOGECOIN compress:{}", address_btc, address_btc_bip84, address_doge);
+                            let private_key_c = hex_to_wif_compressed(&h.to_vec());
+                            print_and_save(hex::encode(&h), &private_key_c, address, &password_string);
+                        }
+                    }
+
+                    //получем из них хеш160
+                    let h160u = hash160(&pk_u[0..]).0;
+
+                    //проверка наличия в базе BTC uncompres
+                    if database_cl.contains(&h160u) {
+                        //пропустим ложное
+                        if password_string != "инициализация потока, пароль <ничто> найденые адреса вне диапазона, хз" {
+                            let address_btc = get_legacy(h160u, LEGACY_BTC);
+                            let address_doge = get_legacy(h160u, LEGACY_DOGE);
+                            let address = format!("\n-BTC uncompres:{}\n-DOGECOIN uncompres:{}", address_btc, address_doge);
+                            let private_key_u = hex_to_wif_uncompressed(&h.to_vec());
+                            print_and_save(hex::encode(&h), &private_key_u, address, &password_string);
+                        }
+                    }
+
+                    let bip49_hash160 = bip_49_hash160c(h160c);
+
+                    //проверка наличия в базе BTC bip49 3.....
+                    if database_cl.contains(&bip49_hash160) {
+                        //пропустим ложное
+                        if password_string != "инициализация потока, пароль <ничто> найденые адреса вне диапазона, хз" {
+                            let address_btc = get_bip49_address(&bip49_hash160, BIP49_BTC);
+                            let address_doge = get_bip49_address(&bip49_hash160, BIP49_DOGE);
+                            let address = format!("\n-BTC bip49:{}\n-DOGECOIN bip49:{}", address_btc, address_doge);
+                            let private_key_c = hex_to_wif_compressed(&h.to_vec());
+                            print_and_save(hex::encode(&h), &private_key_c, address, &password_string);
+                        }
+                    }
+
+
+                    if database_cl.contains(&get_eth_kessak_from_public_key(pk_u)) {
+                        //пропустим ложное
+                        if password_string != "инициализация потока, пароль <ничто> найденые адреса вне диапазона, хз" {
+                            let adr_eth = hex::encode(get_eth_kessak_from_public_key(pk_u));
+                            let adr_trx = get_trx_from_eth(adr_eth.clone());
+                            print_and_save_eth(hex::encode(&h), format!("\n-ETH 0x{adr_eth}\n-TRX {adr_trx}"), &password_string);
+                        }
                     }
                 }
-
-                //получем из них хеш160
-                let h160u = hash160(&pk_u[0..]).0;
-
-                //проверка наличия в базе BTC uncompres
-                if database_cl.contains(&h160u) {
-                    //пропустим ложное
-                    if password_string != "инициализация потока, пароль <ничто> найденые адреса вне диапазона, хз" {
-                        let address_btc = get_legacy(h160u, LEGACY_BTC);
-                        let address_doge = get_legacy(h160u, LEGACY_DOGE);
-                        let address = format!("\n-BTC uncompres:{}\n-DOGECOIN uncompres:{}", address_btc, address_doge);
-                        let private_key_u = hex_to_wif_uncompressed(&h.to_vec());
-                        print_and_save(hex::encode(&h), &private_key_u, address, &password_string);
-                    }
-                }
-
-                let bip49_hash160 = bip_49_hash160c(h160c);
-
-                //проверка наличия в базе BTC bip49 3.....
-                if database_cl.contains(&bip49_hash160) {
-                    //пропустим ложное
-                    if password_string != "инициализация потока, пароль <ничто> найденые адреса вне диапазона, хз" {
-                        let address_btc = get_bip49_address(&bip49_hash160, BIP49_BTC);
-                        let address_doge = get_bip49_address(&bip49_hash160, BIP49_DOGE);
-                        let address = format!("\n-BTC bip49:{}\n-DOGECOIN bip49:{}", address_btc, address_doge);
-                        let private_key_c = hex_to_wif_compressed(&h.to_vec());
-                        print_and_save(hex::encode(&h), &private_key_c, address, &password_string);
-                    }
-                }
-
-
-                if database_cl.contains(&get_eth_kessak_from_public_key(pk_u)) {
-                    //пропустим ложное
-                    if password_string != "инициализация потока, пароль <ничто> найденые адреса вне диапазона, хз" {
-                        let adr_eth = hex::encode(get_eth_kessak_from_public_key(pk_u));
-                        let adr_trx = get_trx_from_eth(adr_eth.clone());
-                        print_and_save_eth(hex::encode(&h), format!("\n-ETH 0x{adr_eth}\n-TRX {adr_trx}"), &password_string);
-                    }
-                }
-
-
                 //шлём в главный поток для получения следующей задачи
                 main_sender.send(ch).unwrap();
             }
@@ -632,8 +674,11 @@ async fn main() {
     let charset_chars: Vec<char> = alvabet.chars().collect();
     let charset_len = if alfabet_ili_list { charset_chars.len() } else { lines.len() };
 
+    // Инициализация вектора с резервированием памяти
+    let mut current_combination: Vec<usize> = Vec::with_capacity(dlinn_a_pasvord);
+
     //состовляем начальную позицию
-    let mut current_combination = vec![0; dlinn_a_pasvord];
+    current_combination.extend(vec![0; dlinn_a_pasvord]);
 
     if alfabet_ili_list{
         //заполняем страртовыми значениями для строки
@@ -653,20 +698,19 @@ async fn main() {
         }
     }else{
         // Разбиение строки на слова
-        let start_perebor_list: Vec<&str> = start_perebor.split_whitespace().collect();
-        //заполняем страртовыми значениями для фраз
+        let start_perebor_list: Vec<&str> =start_perebor.split(',').collect();
+        // Заполняем стартовыми значениями для фраз
         for d in comb_perebor_left..dlinn_a_pasvord {
-            let position = match start_perebor_list.get(d) {
-                Some(&ch) => {
-                    // Находим позицию слова в charset_chars
-                   lines.iter().position(|c| c == ch).unwrap_or_else(|| {
-                        eprintln!("{}", format!("Слово:{} из *начала перебора* не найдено, установлено первое из алфавита", ch));
-                        0
-                    })
-                }
-                None => rng.gen_range(0..charset_len),
-            };
-            current_combination[d] = position;
+            if let Some(&ch) = start_perebor_list.get(d) {
+                // Находим позицию слова в charset_chars
+                let position = lines.iter().position(|c| c == ch).unwrap_or_else(|| {
+                    eprintln!("Слово: '{}' из *начала перебора* не найдено, установлено первое из алфавита", ch);
+                    0
+                });
+                current_combination[d] = position;
+            } else {
+                current_combination[d] = rng.gen_range(0..charset_len);
+            }
         }
     }
 
@@ -703,10 +747,14 @@ async fn main() {
                 }
 
                 if i == 0 && current_combination[0] == charset_len - 1 {
-                    //если включенно увеличение длинны увеличим иначе выйдем из цикла
+                    //если включенно увеличение длинны увеличим иначе, выйдем из цикла
                     if len_uvelichenie {
                         println!("{}{}", blue(format!("ДЛИНА ПАРОЛЯ:{}", green(dlinn_a_pasvord))), magenta(format!(" ПЕРЕБРАТА за:{:?}", start.elapsed())));
                         dlinn_a_pasvord = dlinn_a_pasvord + 1;
+
+                        // Увеличиваем ёмкость вектора, если длина пароля изменилась
+                        current_combination.reserve(dlinn_a_pasvord - current_combination.len());
+
                         current_combination = vec![0; dlinn_a_pasvord];
                         println!("{}{:?}", blue("ТЕКУЩАЯ ДЛИНА ПАРОЛЯ:"), green(dlinn_a_pasvord));
                     } else {
@@ -751,13 +799,9 @@ async fn main() {
             }
 
             // следующая комбинация пароля если алфавит пустой будем по всем возможным перебирать
-            password_string = if alfabet_all {
-                current_combination.iter().map(|&c| char::from_u32(c as u32).unwrap_or(' ')).collect()
-            } else {
-                String::from_iter(
-                    current_combination.iter().map(|&idx| charset_chars[idx])
-                )
-            };
+            password_string = current_combination.iter()
+                .map(|&idx| if alfabet_all { char::from_u32(idx as u32).unwrap_or(' ') } else { charset_chars[idx] })
+                .collect();
 
             password_string = if minikey { format!("S{password_string}") } else { password_string };
         } else {
@@ -775,10 +819,14 @@ async fn main() {
                 }
 
                 if i == 0 && current_combination[0] == charset_len - 1 {
-                    //если включенно увеличение длинны увеличим иначе выйдем из цикла
+                    //если включено увеличение длинны увеличим иначе, выйдем из цикла
                     if len_uvelichenie {
                         println!("{}{}", blue(format!("ДЛИНА ПАРОЛЯ:{}", green(dlinn_a_pasvord))), magenta(format!(" ПЕРЕБРАТА за:{:?}", start.elapsed())));
                         dlinn_a_pasvord = dlinn_a_pasvord + 1;
+
+                        // Увеличиваем ёмкость вектора, если длина пароля изменилась
+                        current_combination.reserve(dlinn_a_pasvord - current_combination.len());
+
                         current_combination = vec![0; dlinn_a_pasvord];
                         println!("{}{:?}", blue("ТЕКУЩАЯ ДЛИНА ПАРОЛЯ:"), green(dlinn_a_pasvord));
                     } else {
@@ -858,11 +906,11 @@ async fn main() {
         } else {
             // или через некоторое время будем сохранять в файл текущий подбор
             if speed > time_save_tekushego_bodbora {
-                println!("{}{}", blue("ТЕКУЩИЙ ПОДБОР:"), green(password_string.clone()));
+                println!("{}{}", blue("ТЕКУЩИЙ ПОДБОР:"), green(password_string.as_str()));
 
                 let alf = if alfabet_ili_list { alvabet.clone() } else { format!("List.txt Длинна{}", dlinn_a_pasvord) };
 
-                add_v_file("ТЕКУЩИЙ ПОДБОР.txt", format!("{} {}\n", password_string.clone(), alf));
+                add_v_file("ТЕКУЩИЙ ПОДБОР.txt", format!("{} {}\n", password_string.as_str(), alf));
                 speed = 0;
             }
         }
