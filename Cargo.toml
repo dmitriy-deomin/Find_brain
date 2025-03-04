@@ -1,6 +1,6 @@
 [package]
 name = "Find_brain"
-version = "0.8.3"
+version = "0.8.5"
 edition = "2021"
 
 [dependencies]
@@ -16,7 +16,7 @@ sha2 = "0.11.0-pre.3"
 sv = "0.2.2"
 tokio = { version = "1.37.0", features = ["rt", "rt-multi-thread", "macros"] }
 num_cpus = "1.16.0"
-rand = "0.8.5"
+rand = "0.9.0"
 bincode = "1.3"
 tiny-keccak = {version = "2.0.2", features = ['keccak']}
 ripemd="0.1.3"
@@ -38,6 +38,9 @@ once_cell = "1.19.0"
 [target.'cfg(windows)'.build-dependencies]
 winres = "0.1.12"
 
-#Минимизирует размер кода
 [profile.release]
-opt-level = 3
+opt-level = 3  # Уровень оптимизации (по умолчанию 3)
+lto = true     # Включение Link-Time Optimization (LTO)
+codegen-units = 1  # Уменьшение количества единиц кодогенерации для улучшения оптимизации
+panic = 'abort'  # Замена паники на аварийное завершение для уменьшения размера бинарника
+incremental = false  # Отключение инкрементальной компиляции для улучшения оптимизации

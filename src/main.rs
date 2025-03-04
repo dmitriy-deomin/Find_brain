@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use base58::{FromBase58, ToBase58};
 use bech32::{segwit, hrp};
 use bincode::{deserialize_from, serialize_into};
-use rand::{Rng, thread_rng};
+use rand::prelude::*;
 use rand::seq::SliceRandom;
 use ripemd::{Ripemd160, Digest as Ripemd160Digest};
 use crate::color::{blue, cyan, green, magenta, red};
@@ -63,7 +63,7 @@ async fn main() {
     };
 
     //рандом
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
 
     //количество ядер процессора
     let count_cpu = num_cpus::get();
@@ -525,7 +525,8 @@ async fn main() {
 
         thread::spawn(move || {
             loop {
-                let password_string: String = receiver.recv().unwrap_or("error".to_string());
+               let password_string: String = receiver.recv().unwrap_or("error".to_string());
+                //let password_string: String = "SG64GZqySYwBm9KxE3wJ29".to_string();
 
                 //если включен режим миникей проверим на валидность ключ
                 if minikey {
@@ -574,7 +575,7 @@ async fn main() {
                     sha256.update(password_string.as_str());
                     let h = sha256.finalize().0;
 
-                    // Получаем публичный ключ для разных систем , адрюха не дружит с ice_library
+                    // Получаем публичный ключ для разных систем, адрюха не дружит с ice_library
                     //------------------------------------------------------------------------
                     #[cfg(windows)]
                     let (pk_u, pk_c) = {
@@ -692,7 +693,7 @@ async fn main() {
                         0
                     })
                 }
-                None => { rng.gen_range(0..charset_len) }
+                None => { rng.random_range(0..charset_len) }
             };
             current_combination[d] = position;
         }
@@ -709,7 +710,7 @@ async fn main() {
                 });
                 current_combination[d] = position;
             } else {
-                current_combination[d] = rng.gen_range(0..charset_len);
+                current_combination[d] = rng.random_range(0..charset_len);
             }
         }
     }
@@ -767,7 +768,7 @@ async fn main() {
             //рандом
             if mode == 1 {
                 for f in 0..dlinn_a_pasvord {
-                    current_combination[f] = rng.gen_range(0..charset_len);
+                    current_combination[f] = rng.random_range(0..charset_len);
                 }
             }
 
@@ -792,7 +793,7 @@ async fn main() {
                             current_combination[f] = 0;
                         } else {
                             //остальные рандомно
-                            current_combination[f] = rng.gen_range(0..charset_len);
+                            current_combination[f] = rng.random_range(0..charset_len);
                         }
                     }
                 }
@@ -849,7 +850,7 @@ async fn main() {
             if mode == 1 {
                 let mut k = String::new(); // Создаем пустую строку
                 for _ in 0..dlinn_a_pasvord {
-                    let rand = lines.get(rng.gen_range(0..lines.len())).unwrap();
+                    let rand = lines.get(rng.random_range(0..lines.len())).unwrap();
                     k.push_str(rand);
                     k.push(' '); // Добавляем разделитель между словами
                 }
@@ -878,7 +879,7 @@ async fn main() {
                             current_combination[f] = 0;
                         } else {
                             //остальные рандомно
-                            current_combination[f] = rng.gen_range(0..charset_len);
+                            current_combination[f] = rng.random_range(0..charset_len);
                         }
                     }
                 }
@@ -1143,11 +1144,10 @@ fn jdem_user_to_close_programm() {
 
 //берем случайные символы из строки
 fn get_rand_alfabet(alvabet: String, size_rand_alfabet: usize) -> String {
-    let mut rng = thread_rng();
     let mut charset_chars: Vec<char> = alvabet.chars().collect();
 
     // Перемешиваем символы
-    charset_chars.shuffle(&mut rng);
+    charset_chars.shuffle(&mut rand::rng());
 
     // Берем первые size_rand_alfabet символов
     let selected_chars: Vec<char> = charset_chars.into_iter().take(size_rand_alfabet).collect();
@@ -1158,9 +1158,8 @@ fn get_rand_alfabet(alvabet: String, size_rand_alfabet: usize) -> String {
 
 //составляем случайный список из полного
 fn get_rand_list(mut list:  Vec<String>, size_rand_alfabet: usize) -> Vec<String> {
-    let mut rng = thread_rng();
     // Перемешиваем символы
-    list.shuffle(&mut rng);
+    list.shuffle(&mut rand::rng());
 
     // Берем первые size_rand_alfabet символов
     let selected_chars: Vec<String> = list.into_iter().take(size_rand_alfabet).collect();
