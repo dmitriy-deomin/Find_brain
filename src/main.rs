@@ -2,7 +2,7 @@ use std::fs::{File, OpenOptions};
 use std::{fs, io, thread};
 use std::collections::HashSet;
 use std::io::{BufRead, BufReader, BufWriter, Lines, Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 //use std::time::{Duration, Instant};
 use base58::{FromBase58, ToBase58};
@@ -18,7 +18,6 @@ use sv::util::{hash160};
 use tiny_keccak::{Hasher, Keccak};
 use crossbeam::channel;
 
-
 #[cfg(not(windows))]
 use rust_secp256k1::{PublicKey, Secp256k1, SecretKey};
 
@@ -27,9 +26,11 @@ mod ice_library;
 
 #[cfg(windows)]
 use ice_library::IceLibrary;
+use crate::util::{convert_file, is_text_file};
 
 mod color;
 mod data;
+mod util;
 
 pub const LEGACY_BTC: u8 = 0x00;
 pub const LEGACY_BTG: u8 = 0x26;
@@ -109,281 +110,56 @@ async fn main() {
         println!("{}", blue("--"));
     } else {
         println!("{}", blue("--"));
-        //провереряем если файл с хешами BTC
-        //--------------------------------------------------------------------------------------------
-        if fs::metadata(Path::new("btc_h160.bin")).is_ok() {
-            println!("{}", green("файл btc_h160.bin уже существует,конвертирование пропущено"));
-        } else {
-            //проверяем есть ли файл(создаём) и считаем сколько строк
-            let len_btc_txt = get_len_find_create("btc.txt");
+            let dir_path = "."; // Текущая директория
+            let mut text_files: Vec<PathBuf> = Vec::new(); // Список для хранения путей к текстовым файлам
 
-            println!("{}", blue("конвертирование адресов в h160 и сохранение в btc_h160.bin"));
-            //конвертируем в h160 и записываем в файл рядом
-            //создаём файл
-            let mut file = File::create("btc_h160.bin").unwrap();
-            //ищем в списке нужные делаем им харакири и ложим обрубки в файл
-            let mut len_btc = 0;
-            for (index, address) in get_bufer_file("btc.txt").lines().enumerate() {
-                let address = address.expect("Ошибка чтения адреса со строки");
-
-                //адреса с bc1...
-                let binding = if address.starts_with("bc1") {
-                    bip84_to_h160(address)
-                } else {
-                    //адреса 1.. 3...
-                    match address.from_base58() {
-                        Ok(value) => {
-                            let mut a: [u8; 20] = [0; 20];
-                            if value.len() >= 21 {
-                                a.copy_from_slice(&value.as_slice()[1..21]);
-                                a
-                            } else {
-                                eprintln!("{}", red(format!("ОШИБКА, АДРЕС НЕ ВАЛИДЕН строка: {} {}", index + 1, address)));
-                                continue; // Skip this address and move to the next
-                            }
-                        }
-                        Err(_) => {
-                            eprintln!("{}", red(format!("ОШИБКА ДЕКОДИРОВАНИЯ В base58 строка: {} {}", index + 1, address)));
-                            continue; // Skip this address and move to the next
+            if let Ok(entries) = fs::read_dir(dir_path) {
+                for entry in entries {
+                    if let Ok(entry) = entry {
+                        let path = entry.path();
+                        if path.is_file() && is_text_file(&path) {
+                            text_files.push(path); // Добавляем путь в список
                         }
                     }
-                };
-
-
-                if let Err(e) = file.write_all(&binding) {
-                    eprintln!("Не удалось записать в файл: {}", e);
-                } else {
-                    len_btc = len_btc + 1;
                 }
+            } else {
+                eprintln!("Failed to read directory: {}", dir_path);
             }
-            println!("{}", blue(format!("конвертировано адресов в h160:{}/{}", green(len_btc_txt), green(len_btc))));
-        }
-        //-----------------------------------------------------------------------------------------------
-        println!("{}", blue("--"));
 
-        //провереряем если файл с хешами DOGECOIN
-        //--------------------------------------------------------------------------------------------
-        if fs::metadata(Path::new("dogecoin_h160.bin")).is_ok() {
-            println!("{}", green("файл dogecoin_h160.bin уже существует,конвертирование пропущено"));
-        } else {
-            //проверяем есть ли файл(создаём) и считаем сколько строк
-            let len_btc_txt = get_len_find_create("dogecoin.txt");
-
-            println!("{}", blue("конвертирование адресов в h160 и сохранение в dogecoin_h160.bin"));
-            //конвертируем в h160 и записываем в файл рядом
-            //создаём файл
-            let mut file = File::create("dogecoin_h160.bin").unwrap();
-            //ищем в списке нужные делаем им харакири и ложим обрубки в файл
-            let mut len_btc = 0;
-            for (index, address) in get_bufer_file("dogecoin.txt").lines().enumerate() {
-                let binding = match address.expect("REASON").from_base58() {
-                    Ok(value) => value,
-                    Err(_err) => {
-                        eprintln!("{}", red(format!("ОШИБКА ДЕКОДИРОВАНИЯ В base58 строка:{}", index + 1)));
-                        continue; // Пропускаем этот адрес и переходим к следующему
+            if text_files.len() == 0 {
+                //
+                get_len_find_create("base_btc.txt");
+                println!("{}",blue("Файлы рядом ненайдены,используею встроеную базу миникей:"));
+                convert_file("base_btc.txt",&mut database);
+            }else{
+                // Выводим список найденных текстовых файлов
+                println!("{}",blue("Найденые рядом файлы:"));
+                for file in &text_files {
+                    let fname = file.file_name().unwrap().to_str().unwrap().to_string();
+                    if  fname.starts_with("base_"){
+                        println!("{:?}", green(fname));
                     }
-                };
-
-                let mut a: [u8; 20] = [0; 20];
-
-                if binding.len() >= 21 {
-                    a.copy_from_slice(&binding.as_slice()[1..21]);
-                    if let Err(e) = file.write_all(&a) {
-                        eprintln!("Не удалось записать в файл: {}", e);
-                    } else {
-                        len_btc = len_btc + 1;
-                    }
-                } else {
-                    eprintln!("{}", red(format!("ОШИБКА,АДРЕСС НЕ ВАЛИДЕН строка:{}", index + 1)));
                 }
-            }
-            println!("{}", blue(format!("конвертировано адресов в h160:{}/{}", green(len_btc_txt), green(len_btc))));
-        }
-        //-----------------------------------------------------------------------------------------------
-
-        println!("{}", blue("--"));
-
-        //провереряем если файл с хешами ETH
-        //--------------------------------------------------------------------------------------------
-        if fs::metadata(Path::new("eth.bin")).is_ok() {
-            println!("{}", green("файл eth.bin уже существует,конвертирование пропущено"));
-        } else {
-            //проверяем есть ли файл(создаём) и считаем сколько строк
-            let len_eth_txt = get_len_find_create("eth.txt");
-
-            println!("{}", blue("конвертирование адресов и сохранение в eth.bin"));
-
-            let file = OpenOptions::new()
-                .create(true)
-                .write(true)
-                .truncate(true)
-                .open("eth.bin")
-                .unwrap();
-            let mut writer = BufWriter::new(file);
-
-            let mut len_eth = 0;
-            let mut invalid_addresses = Vec::new();
-
-            for (index, line) in get_bufer_file("eth.txt").lines().enumerate() {
-                match line {
-                    Ok(address) => match eth_address_to_bytes(&address) {
-                        Ok(bytes) => {
-                            if let Err(e) = writer.write_all(&bytes) {
-                                eprintln!("Не удалось записать в файл: {}", e);
-                            } else {
-                                len_eth += 1;
-                            }
-                        }
-                        Err(e) => {
-                            invalid_addresses.push((index, address, e));
-                        }
-                    },
-                    Err(e) => {
-                        invalid_addresses.push((index, "".to_string(), e.to_string()));
+                println!("{}",blue("конвертирование адресов в h160 хеш и добавление в базу"));
+                for file in &text_files {
+                    let fname = file.file_name().unwrap().to_str().unwrap().to_string();
+                    if  fname.starts_with("base_"){
+                        println!("{:?}", green(&fname));
+                        convert_file(fname.as_str(),&mut database);
                     }
                 }
             }
 
-            println!("{}", blue(format!("конвертировано адресов:{}/{}", green(len_eth_txt), green(len_eth))));
 
-            if !invalid_addresses.is_empty() {
-                println!("Invalid addresses:");
-                for (index, address, error) in invalid_addresses {
-                    println!("Line {}: {} ({})", index + 1, address, error);
-                }
-            }
+
+        //проверка есть ли в базе вообще чего
+        if database.len() == 0 {
+            println!("{}", red("БАЗА ПУСТА\nпоместите рядом с программой текстовые файлы со списком адресов,\
+            названия файлов должны начинаться с base_:\nbase_btc.txt,base_eth.txt,base_trx.txt\n(любое количество файлов)"));
+            jdem_user_to_close_programm();
+            return;
         }
-        //-----------------------------------------------------------------------------------------------
 
-        //провереряем если файл с хешами TRX
-        println!("{}", blue("--"));
-        //провереряем если файл с хешами BTC
-        //--------------------------------------------------------------------------------------------
-        if fs::metadata(Path::new("trx_h160.bin")).is_ok() {
-            println!("{}", green("файл trx_h160.bin уже существует,конвертирование пропущено"));
-        } else {
-            //проверяем есть ли файл(создаём) и считаем сколько строк
-            let len_trx_txt = get_len_find_create("trx.txt");
-
-            println!("{}", blue("конвертирование адресов в h160 и сохранение в trx_h160.bin"));
-            //конвертируем в h160 и записываем в файл рядом
-            //создаём файл
-            let mut file = File::create("trx_h160.bin").unwrap();
-            //ищем в списке нужные делаем им харакири и ложим обрубки в файл
-            let mut len_trx = 0;
-            for (index, address) in get_bufer_file("trx.txt").lines().enumerate() {
-                let binding = match address.expect("REASON").from_base58() {
-                    Ok(value) => value,
-                    Err(_err) => {
-                        eprintln!("{}", red(format!("ОШИБКА ДЕКОДИРОВАНИЯ В base58 строка:{}", index + 1)));
-                        continue; // Пропускаем этот адрес и переходим к следующему
-                    }
-                };
-
-                let mut a: [u8; 20] = [0; 20];
-
-                if binding.len() >= 21 {
-                    a.copy_from_slice(&binding.as_slice()[1..21]);
-                    if let Err(e) = file.write_all(&a) {
-                        eprintln!("Не удалось записать в файл: {}", e);
-                    } else {
-                        len_trx = len_trx + 1;
-                    }
-                } else {
-                    eprintln!("{}", red(format!("ОШИБКА,АДРЕСС НЕ ВАЛИДЕН строка:{}", index + 1)));
-                }
-            }
-            println!("{}", blue(format!("конвертировано адресов в h160:{}/{}", green(len_trx_txt), green(len_trx))));
-        }
-        //-----------------------------------------------------------------------------------------------
-        println!("{}", blue("--"));
-
-
-        //************************************************************************************************
-        // запись BTC в базу
-        let mut colichestvo_btc = 0;
-        println!("{}", blue("ЗАПИСЬ BTC ДАННЫХ В БАЗУ.."));
-        let mut old_len_baza = database.len();
-        let file = File::open("btc_h160.bin").expect("неудалось открыть файл");
-        let mut reader = BufReader::new(file);
-        loop {
-            let mut array = [0u8; 20];
-            match reader.read_exact(&mut array) {
-                Ok(_) => {
-                    colichestvo_btc = colichestvo_btc + 1;
-                    database.insert(array);
-                }
-                Err(ref e) if e.kind() == io::ErrorKind::UnexpectedEof => break,
-                _ => {}
-            }
-        }
-        println!("{}{}", blue("Данные BTC успешно загружены в базу:"), green(format!("{}/{colichestvo_btc} шт", database.len() - old_len_baza)));
-        println!("{}", blue("--"));
-
-
-        // запись TRX в базу
-        let mut colichestvo_trx = 0;
-        println!("{}", blue("ЗАПИСЬ TRX ДАННЫХ В БАЗУ.."));
-        let file = File::open("trx_h160.bin").expect("неудалось открыть файл");
-        old_len_baza = database.len();
-        let mut reader = BufReader::new(file);
-        loop {
-            let mut array = [0u8; 20];
-            match reader.read_exact(&mut array) {
-                Ok(_) => {
-                    colichestvo_trx = colichestvo_trx + 1;
-                    database.insert(array);
-                }
-                Err(ref e) if e.kind() == io::ErrorKind::UnexpectedEof => break,
-                _ => {}
-            }
-        }
-        println!("{}{}", blue("Данные TRX успешно загружены в базу:"), green(format!("{}/{colichestvo_trx} шт", database.len() - old_len_baza)));
-        println!("{}", blue("--"));
-
-
-        // запись DOGECOIN в базу
-        let mut colichestvo_dogecoin = 0;
-        old_len_baza = database.len();
-        println!("{}", blue("ЗАПИСЬ DOGECOIN ДАННЫХ В БАЗУ.."));
-        let file = File::open("dogecoin_h160.bin").expect("неудалось открыть файл");
-        let mut reader = BufReader::new(file);
-        loop {
-            let mut array = [0u8; 20];
-            match reader.read_exact(&mut array) {
-                Ok(_) => {
-                    colichestvo_dogecoin = colichestvo_dogecoin + 1;
-                    database.insert(array);
-                }
-                Err(ref e) if e.kind() == io::ErrorKind::UnexpectedEof => break,
-                _ => {}
-            }
-        }
-        println!("{}{}", blue("Данные DOGECOIN успешно загружены в базу:"), green(format!("{}/{colichestvo_dogecoin} шт", database.len() - old_len_baza)));
-        println!("{}", blue("--"));
-
-        //запись ETH в базу
-        let mut colichestvo_eth = 0;
-        old_len_baza = database.len();
-        println!("{}", blue("ЗАПИСЬ ETH ДАННЫХ В БАЗУ.."));
-        let file = File::open("eth.bin").expect("неудалось открыть файл");
-        let mut reader = BufReader::new(file);
-        loop {
-            let mut array = [0u8; 20];
-            match reader.read_exact(&mut array) {
-                Ok(_) => {
-                    colichestvo_eth = colichestvo_eth + 1;
-                    database.insert(array);
-                }
-                Err(ref e) if e.kind() == io::ErrorKind::UnexpectedEof => break,
-                _ => {}
-            }
-        }
-        println!("{}{}", blue("Данные ETH успешно загружены в базу:"), green(format!("{}/{colichestvo_eth} шт", database.len() - old_len_baza)));
-
-        println!("{}", blue("--"));
-        println!("{}{}", blue("ИТОГО ЗАГРУЖЕННО В БАЗУ:"), green(format!("{}/{} шт", database.len(), colichestvo_btc + colichestvo_eth + colichestvo_dogecoin + colichestvo_trx)));
-        println!("{}", blue("--"));
 
         // Сохраним HashSet в файл
         println!("{}", blue("СОХРАНЕНИЕ ОБШЕЙ БАЗЫ В database.bin"));
@@ -393,14 +169,6 @@ async fn main() {
         }
         println!("{}", blue("--"));
     }
-
-    //проверка есть ли в базе вообще чего
-    if database.len() == 0 {
-        println!("{}", red("БАЗА ПУСТА\nпоместите рядом с программой текстовые файлы со списком адресов:\nbtc.txt,eth.txt,trx.txt,dogecoin.txt"));
-        jdem_user_to_close_programm();
-        return;
-    }
-
 
     //ИНфо блок
     //||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
@@ -1024,26 +792,7 @@ pub fn get_eth_kessak_from_public_key(public_key_u: [u8; 65]) -> [u8; 20] {
     result
 }
 
-fn eth_address_to_bytes(address: &str) -> Result<[u8; 20], String> {
-    let hex_str = if address.starts_with("0x") {
-        &address[2..]
-    } else {
-        address
-    };
 
-    match hex::decode(hex_str) {
-        Ok(decoded) => {
-            if decoded.len() == 20 {
-                let mut bytes = [0u8; 20];
-                bytes.copy_from_slice(&decoded);
-                Ok(bytes)
-            } else {
-                Err(format!("Invalid length for address: {}", address))
-            }
-        }
-        Err(_) => Err(format!("Decoding failed for address: {}", address)),
-    }
-}
 
 //bip49------------------------------------------------------
 pub fn bip_49_hash160c(hash160c: [u8; 20]) -> [u8; 20] {
@@ -1098,12 +847,9 @@ pub fn get_len_find_create(coin: &str) -> usize {
         Err(_) => {
             print!("{}{}", blue("ФАЙЛ НЕ НАЙДЕН,ИСПОЛЬЗУЕМ ВСТРОЕНЫЙ:"), green(format!("{coin}:")));
             let dockerfile = match coin {
-                "btc.txt" => { include_str!("btc.txt") }
-                "dogecoin.txt" => { include_str!("dogecoin.txt") }
-                "eth.txt" => { include_str!("eth.txt") }
-                "trx.txt" => { include_str!("trx.txt") }
+                "base_btc.txt" => { include_str!("base_btc.txt") }
                 "list.txt" => { include_str!("list.txt") }
-                _ => { include_str!("btc.txt") }
+                _ => { include_str!("base_btc.txt") }
             };
             add_v_file(coin, dockerfile.to_string());
             let lines = get_lines(coin);
@@ -1168,18 +914,7 @@ fn get_rand_list(mut list:  Vec<String>, size_rand_alfabet: usize) -> Vec<String
     selected_chars.into_iter().collect()
 }
 
-fn bip84_to_h160(address: String) -> [u8; 20] {
-    let (_hrp, _version, program) = segwit::decode(&address).expect("valid address");
 
-    if program.len() == 20 {
-        // Convert Vec<u8> to [u8; 20]
-        let mut h160 = [0u8; 20];
-        h160.copy_from_slice(&program);
-        h160
-    } else {
-        [0u8; 20]
-    }
-}
 
 //сохранение и загрузка базы из файла
 fn save_to_file(set: &HashSet<[u8; 20]>, file_path: &str) -> Result<(), Box<dyn std::error::Error>> {

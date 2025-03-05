@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 rustils="0.1.23"
+walkdir = "2.5.0"
 
 #цветной вывод в консоль
 console = "0.15.7"
