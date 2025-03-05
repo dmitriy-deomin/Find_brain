@@ -1,10 +1,10 @@
 use std::fs::{File, OpenOptions};
 use std::{fs, io, thread};
 use std::collections::HashSet;
-use std::io::{BufRead, BufReader, BufWriter, Lines, Read, stdout, Write};
+use std::io::{BufRead, BufReader, BufWriter, Lines, Read, Write};
 use std::path::Path;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+//use std::time::{Duration, Instant};
 use base58::{FromBase58, ToBase58};
 use bech32::{segwit, hrp};
 use bincode::{deserialize_from, serialize_into};
@@ -662,9 +662,9 @@ async fn main() {
     //подготовка к запуску главного цикла
     //-----------------------------------------------------------------------------------------
     //для измерения скорости
-    let mut start = Instant::now();
-    let mut speed: u32 = 0;
-    let one_sek = Duration::from_secs(1);
+    //let mut start = Instant::now();
+    //let mut speed: u32 = 0;
+   // let one_sek = Duration::from_secs(1);
 
     let alfabet_all = if alvabet == "0".to_string() { true } else { false };
 
@@ -750,7 +750,7 @@ async fn main() {
                 if i == 0 && current_combination[0] == charset_len - 1 {
                     //если включенно увеличение длинны увеличим иначе, выйдем из цикла
                     if len_uvelichenie {
-                        println!("{}{}", blue(format!("ДЛИНА ПАРОЛЯ:{}", green(dlinn_a_pasvord))), magenta(format!(" ПЕРЕБРАТА за:{:?}", start.elapsed())));
+                       // println!("{}{}", blue(format!("ДЛИНА ПАРОЛЯ:{}", green(dlinn_a_pasvord))), magenta(format!(" ПЕРЕБРАТА за:{:?}", start.elapsed())));
                         dlinn_a_pasvord = dlinn_a_pasvord + 1;
 
                         // Увеличиваем ёмкость вектора, если длина пароля изменилась
@@ -822,7 +822,7 @@ async fn main() {
                 if i == 0 && current_combination[0] == charset_len - 1 {
                     //если включено увеличение длинны увеличим иначе, выйдем из цикла
                     if len_uvelichenie {
-                        println!("{}{}", blue(format!("ДЛИНА ПАРОЛЯ:{}", green(dlinn_a_pasvord))), magenta(format!(" ПЕРЕБРАТА за:{:?}", start.elapsed())));
+                      //  println!("{}{}", blue(format!("ДЛИНА ПАРОЛЯ:{}", green(dlinn_a_pasvord))), magenta(format!(" ПЕРЕБРАТА за:{:?}", start.elapsed())));
                         dlinn_a_pasvord = dlinn_a_pasvord + 1;
 
                         // Увеличиваем ёмкость вектора, если длина пароля изменилась
@@ -892,29 +892,29 @@ async fn main() {
                 password_string = s.trim().to_string();
             }
         }
+        // speed = speed + 1;
+        // if show_info {
+        //     //измеряем скорость и шлём прогресс
+        //     if start.elapsed() >= one_sek {
+        //         let mut stdout = stdout();
+        //         print!("{}\r{}", BACKSPACE, green(format!("SPEED:{speed}/s|{}", format!("{}", password_string))));
+        //         stdout.flush().unwrap();
+        //         start = Instant::now();
+        //         speed = 0;
+        //     }
+        //   } else {
+        //     // или через некоторое время будем сохранять в файл текущий подбор
+        //     if speed > time_save_tekushego_bodbora {
+        //         println!("{}{}", blue("ТЕКУЩИЙ ПОДБОР:"), green(password_string.as_str()));
+        //
+        //         let alf = if alfabet_ili_list { alvabet.clone() } else { format!("List.txt Длинна{}", dlinn_a_pasvord) };
+        //
+        //         add_v_file("ТЕКУЩИЙ ПОДБОР.txt", format!("{} {}\n", password_string.as_str(), alf));
+        //         speed = 0;
+        //     }
+        // }
 
 
-        speed = speed + 1;
-        if show_info {
-            //измеряем скорость и шлём прогресс
-            if start.elapsed() >= one_sek {
-                let mut stdout = stdout();
-                print!("{}\r{}", BACKSPACE, green(format!("SPEED:{speed}/s|{}", format!("{}", password_string))));
-                stdout.flush().unwrap();
-                start = Instant::now();
-                speed = 0;
-            }
-        } else {
-            // или через некоторое время будем сохранять в файл текущий подбор
-            if speed > time_save_tekushego_bodbora {
-                println!("{}{}", blue("ТЕКУЩИЙ ПОДБОР:"), green(password_string.as_str()));
-
-                let alf = if alfabet_ili_list { alvabet.clone() } else { format!("List.txt Длинна{}", dlinn_a_pasvord) };
-
-                add_v_file("ТЕКУЩИЙ ПОДБОР.txt", format!("{} {}\n", password_string.as_str(), alf));
-                speed = 0;
-            }
-        }
         // Отправляем новую в свободный канал
         channels[ch].send(password_string.clone()).unwrap();
     }

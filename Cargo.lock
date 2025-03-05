@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "Find_brain"
-version = "0.8.5"
+version = "0.8.6"
 dependencies = [
  "base58",
  "bech32",

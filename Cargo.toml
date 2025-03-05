@@ -1,6 +1,6 @@
 [package]
 name = "Find_brain"
-version = "0.8.5"
+version = "0.8.6"
 edition = "2021"
 
 [dependencies]
@@ -44,3 +44,6 @@ lto = true     # Включение Link-Time Optimization (LTO)
 codegen-units = 1  # Уменьшение количества единиц кодогенерации для улучшения оптимизации
 panic = 'abort'  # Замена паники на аварийное завершение для уменьшения размера бинарника
 incremental = false  # Отключение инкрементальной компиляции для улучшения оптимизации
+
+[build]
+rustflags = ["-C", "target-cpu=native"]
